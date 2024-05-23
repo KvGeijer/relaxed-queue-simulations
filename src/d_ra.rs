@@ -13,6 +13,90 @@ pub struct DRa<T: PartialEq + Eq> {
 
     /// If true, cannot sample the same partial several times for one d-choice
     uniques: bool,
+
+    /// If true, uses the new progress-based heuristic, otherwise the length-based
+    progress_heuristic: bool,
+
+    /// If true, uses round robin when finding an empty queue
+    empty_lin: bool,
+}
+
+impl<T: PartialEq + Eq> DRa<T> {
+    pub fn new(
+        nbr_partials: usize,
+        d: usize,
+        uniques: bool,
+        progress_heuristic: bool,
+        empty_lin: bool,
+    ) -> Self {
+        Self {
+            partials: (0..nbr_partials).map(|_| Partial::new()).collect(),
+            d,
+            uniques,
+            progress_heuristic,
+            empty_lin,
+        }
+    }
+
+    /// Enqueues an item into the D-Ra
+    pub fn enqueue(&mut self, item: T) {
+        // Find partial ind, depending on heuristic used (this is not super optimized)
+        let partial_ind = if self.progress_heuristic {
+            self.partial_inds()
+                .into_iter()
+                .min_by_key(|ind| self.partials[*ind].tail)
+        } else {
+            self.partial_inds()
+                .into_iter()
+                .min_by_key(|ind| self.partials[*ind].tail - self.partials[*ind].head)
+        }
+        .expect("Should always be able to find an index if d>0");
+
+        self.partials[partial_ind].enqueue(item);
+    }
+
+    pub fn dequeue(&mut self) -> Option<T> {
+        // Find partial ind, depending on heuristic used (this is not super optimized)
+        let partial_ind = if self.progress_heuristic {
+            self.partial_inds()
+                .into_iter()
+                .min_by_key(|ind| self.partials[*ind].head)
+        } else {
+            self.partial_inds()
+                .into_iter()
+                .max_by_key(|ind| self.partials[*ind].tail - self.partials[*ind].head)
+        }
+        .expect("Should always be able to find an index if d>0");
+
+        match self.partials[partial_ind].dequeue() {
+            None if self.empty_lin => {
+                let mut ind = partial_ind;
+                for _ in 0..self.partials.len() - 1 {
+                    ind = (ind + 1) % self.partials.len();
+                    if self.partials[ind].len() > 0 {
+                        return self.partials[ind].dequeue();
+                    }
+                }
+                None
+            }
+            otherwise => otherwise,
+        }
+    }
+
+    /// Gets partial inds, depending on allowing repeats of not
+    fn partial_inds(&self) -> Vec<usize> {
+        if self.uniques {
+            (0..self.partials.len())
+                .collect::<Vec<usize>>()
+                .choose_multiple(&mut rand::thread_rng(), self.d)
+                .cloned()
+                .collect()
+        } else {
+            (0..self.d)
+                .map(|_| rand::thread_rng().gen_range(0..self.partials.len()))
+                .collect()
+        }
+    }
 }
 
 struct Partial<T: PartialEq + Eq> {
@@ -21,59 +105,30 @@ struct Partial<T: PartialEq + Eq> {
     fifo: VecDeque<T>,
 }
 
-impl<T: PartialEq + Eq> DRa<T> {
-    /// Enqueues an item into the D-Ra
-    pub fn enqueue(&mut self, item: T) {
-        let partial_ind = if self.uniques {
-            (0..self.partials.len())
-                .collect::<Vec<usize>>()
-                .choose_multiple(&mut rand::thread_rng(), self.d)
-                .cloned()
-                .min_by_key(|ind| self.partials[*ind].tail)
-                .expect("Should always be able to find an index if d>0")
-        } else {
-            (0..self.d)
-                .map(|_| rand::thread_rng().gen_range(0..self.partials.len()))
-                .min_by_key(|ind| self.partials[*ind].tail)
-                .expect("Should always be able to find an index if d>0")
-        };
-
-        // TODO: Add option for length-based vs progress-based heuristic
-
-        self.partials[partial_ind].enqueue(item);
-    }
-
-    pub fn dequeue(&mut self) -> Option<T> {
-        let partial_ind = if self.uniques {
-            (0..self.partials.len())
-                .collect::<Vec<usize>>()
-                .choose_multiple(&mut rand::thread_rng(), self.d)
-                .cloned()
-                .min_by_key(|ind| self.partials[*ind].head)
-                .expect("Should always be able to find an index if d>0")
-        } else {
-            (0..self.d)
-                .map(|_| rand::thread_rng().gen_range(0..self.partials.len()))
-                .min_by_key(|ind| self.partials[*ind].head)
-                .expect("Should always be able to find an index if d>0")
-        };
-
-        // TODO: Add a switch to toggle empty linearizable
-        // TODO: Add option for length-based vs progress-based heuristic
-
-        self.partials[partial_ind].dequeue()
-    }
-}
-
 impl<T: PartialEq + Eq> Partial<T> {
+    fn new() -> Self {
+        Self {
+            head: 0,
+            tail: 0,
+            fifo: VecDeque::new(),
+        }
+    }
+
     fn enqueue(&mut self, item: T) {
         self.tail += 1;
         self.fifo.push_back(item)
     }
 
     fn dequeue(&mut self) -> Option<T> {
-        self.head += 1;
-        self.fifo.pop_front()
+        let ret = self.fifo.pop_front();
+        if ret.is_some() {
+            self.head += 1;
+        }
+        ret
+    }
+
+    fn len(&self) -> usize {
+        self.fifo.len()
     }
 }
 

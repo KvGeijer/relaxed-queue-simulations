@@ -1,3 +1,3 @@
-mod d_ra;
-mod relaxation_analysis;
+pub mod d_ra;
+pub mod relaxation_analysis;
 mod relaxed_fifo;
