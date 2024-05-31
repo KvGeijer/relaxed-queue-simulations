@@ -2,6 +2,8 @@
 name = "relaxation-analysis"
 version = "0.1.0"
 edition = "2021"
+description = "A tool for simulating the relaxation behavior of a simplified FIFO MultiQueue (d-RA)."
 
 [dependencies]
+clap = { version = "4.5.4", features = ["derive"] }
 rand = "0.8.5"
