@@ -5,10 +5,6 @@ use relaxation_analysis::{analyze, DRa};
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
-    /// Optional name of output file. Defaults to "results/{test}-{datetime}.json"
-    #[arg(long)]
-    output_file: Option<String>,
-
     #[command(subcommand)]
     test: Test,
 }
@@ -22,6 +18,21 @@ enum Test {
         queue: QueueArg,
 
         /// The number of operations to run
+        #[arg(short, long = "ops")]
+        operations: usize,
+
+        /// The number of initial items in the queue before starting the experiment
+        #[arg(short = 'i', long)]
+        prefill: usize,
+    },
+
+    /// Performs pairs of enqueue/dequeue operations, testing a single queue
+    SingleAlternating {
+        /// The queue configuration to use
+        #[command(flatten)]
+        queue: QueueArg,
+
+        /// The number of operation pairs to run
         #[arg(short, long = "ops")]
         operations: usize,
 
@@ -95,6 +106,16 @@ fn main() {
             let operations = (0..operations)
                 .map(|_| rand::thread_rng().gen_bool(0.5))
                 .collect();
+            let queue = queue.init();
+            let avg_error = avg(analyze(queue, prefill, &operations));
+            println!("{avg_error}");
+        }
+        Test::SingleAlternating {
+            queue,
+            operations,
+            prefill,
+        } => {
+            let operations = (0..2 * operations).map(|i| i % 2 == 0).collect();
             let queue = queue.init();
             let avg_error = avg(analyze(queue, prefill, &operations));
             println!("{avg_error}");
