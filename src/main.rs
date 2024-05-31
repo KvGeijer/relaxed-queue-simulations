@@ -1,15 +1,23 @@
+use std::{
+    collections::HashMap,
+    fs::{create_dir_all, File},
+    io::Write,
+    path::PathBuf,
+};
+
+use chrono::Local;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use rand::Rng;
 use relaxation_analysis::{analyze, DRa};
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[command(version, about)]
 struct Cli {
     #[command(subcommand)]
     test: Test,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum Test {
     /// Randomly performs enqueue or dequeue operations, testing a single queue
     SingleRandom {
@@ -40,9 +48,32 @@ enum Test {
         #[arg(short = 'i', long)]
         prefill: usize,
     },
+
+    /// Performs many tests for a queue, for combinations of operations and prefill
+    OpsAndPrefill {
+        /// The queue configuration to use
+        #[command(flatten)]
+        queue: QueueArg,
+
+        /// The number of operations
+        #[arg(short, long = "ops", value_delimiter = ' ', num_args = 1..)]
+        operations: Vec<usize>,
+
+        /// The number of initial items in the queue before starting the experiment
+        #[arg(short = 'i', long, value_delimiter = ' ', num_args = 1..)]
+        prefill: Vec<usize>,
+
+        /// How to generate the operations
+        #[arg(value_enum, long = "ops-distr", default_value_t = OperationDistribution::RandomBalanced)]
+        operations_distribution: OperationDistribution,
+
+        /// The name of the output json file, ends up at "results/{name}-{datetime}.json"
+        #[arg(long, default_value_t = format!("OpsAndPrefill"))]
+        output_name: String,
+    },
 }
 
-#[derive(Args)]
+#[derive(Args, Debug)]
 struct QueueArg {
     /// The number of partial queues to use
     #[arg(short, long)]
@@ -61,7 +92,7 @@ struct QueueArg {
     sampling: Sampling,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
 enum Heuristic {
     /// Length-based heuristic, as in the original d-RA load balancer.
     Length,
@@ -70,13 +101,22 @@ enum Heuristic {
     Operation,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
 enum Sampling {
     /// Just samples d values at random
     Naive,
 
     /// Does not sample the same index twice
     Uniques,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
+enum OperationDistribution {
+    /// Randomly generate at equal probability
+    RandomBalanced,
+
+    /// Sequentially alternates enqueue and dequeues
+    Alternating,
 }
 
 impl QueueArg {
@@ -119,6 +159,55 @@ fn main() {
             let queue = queue.init();
             let avg_error = avg(analyze(queue, prefill, &operations));
             println!("{avg_error}");
+        }
+        Test::OpsAndPrefill {
+            queue,
+            operations,
+            prefill,
+            operations_distribution,
+            output_name,
+        } => {
+            let mut results: HashMap<(usize, usize), _> = HashMap::new();
+            for ops in operations.iter() {
+                let ops_vec = match operations_distribution {
+                    OperationDistribution::RandomBalanced => (0..*ops)
+                        .map(|_| rand::thread_rng().gen_bool(0.5))
+                        .collect(),
+                    OperationDistribution::Alternating => (0..*ops).map(|i| i % 2 == 0).collect(),
+                };
+                for pre in prefill.iter() {
+                    let key = (*pre, *ops);
+                    if results.contains_key(&key) {
+                        eprintln!(
+                            "WARNING: Duplicate ops {ops} or prefill {pre} in cli arguments!"
+                        );
+                    } else {
+                        let queue = queue.init();
+                        results.insert(key, avg(analyze(queue, *pre, &ops_vec)));
+                    }
+                }
+            }
+
+            // Inefficient way to get it to print nicely
+            let string_keyed_results: HashMap<String, f32> = results
+                .into_iter()
+                .map(|((pre, ops), avg)| (format!("({pre}, {ops})"), avg))
+                .collect();
+            let serialized_output = serde_json::to_string_pretty(&string_keyed_results)
+                .expect("Could not serialize the output.");
+
+            let timestamp = Local::now().format("%Y%m%d-%H%M%S").to_string();
+            // TODO: Don't always save it in results, in case we want to run from somewhere else
+            let folder = "results";
+            let path = PathBuf::from(folder).join(format!("{output_name}-{timestamp}.json"));
+
+            // Create directory and file
+            create_dir_all(folder).expect("Could not create the results dir");
+            let mut file = File::create(&path).expect("Failed to create file");
+            file.write_all(serialized_output.as_bytes())
+                .expect("Failed to write output to file");
+
+            println!("Writing output to: {}", path.to_string_lossy());
         }
     }
 }
