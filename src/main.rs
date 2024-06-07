@@ -49,7 +49,7 @@ enum Test {
         prefill: usize,
     },
 
-    /// Performs many tests for a queue, for combinations of operations and prefill
+    /// Performsrmany tests for a queue, for combinations of operations and prefill
     OpsAndPrefill {
         /// The queue configuration to use
         #[command(flatten)]
@@ -71,6 +71,33 @@ enum Test {
         #[arg(long, default_value_t = format!("OpsAndPrefill"))]
         output_name: String,
     },
+
+    /// Tests all combinations of partial queues and prefill
+    PartialsAndPrefill {
+        /// The queue configuration to use
+        #[command(flatten)]
+        queue: QueueConfig,
+
+        /// The number of operations to run
+        #[arg(short, long = "ops")]
+        operations: usize,
+
+        /// All partial configurations to test
+        #[arg(short, value_delimiter = ' ', num_args = 1..)]
+        partials: Vec<usize>,
+
+        /// The number of initial items in the queue before starting the experiment
+        #[arg(short = 'i', long, value_delimiter = ' ', num_args = 1..)]
+        prefill: Vec<usize>,
+
+        /// How to generate the operations
+        #[arg(value_enum, long = "ops-distr", default_value_t = OperationDistribution::RandomBalanced)]
+        operations_distribution: OperationDistribution,
+
+        /// The name of the output json file, ends up at "results/{name}-{datetime}.json"
+        #[arg(long, default_value_t = format!("PartialsAndPrefill"))]
+        output_name: String,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -79,8 +106,15 @@ struct QueueArg {
     #[arg(short, long)]
     partials: usize,
 
-    /// The number of partials to sample for each operation (d)
-    #[arg(short = 'd', long)]
+    /// Further config about how the queues works
+    #[command(flatten)]
+    config: QueueConfig,
+}
+
+#[derive(Args, Debug)]
+struct QueueConfig {
+    /// The number of partials to sample for each operation (d).
+    #[arg(short = 'd', long, default_value_t = 2)]
     sample_nbr: usize,
 
     /// What sampling heuristic to use
@@ -121,8 +155,14 @@ enum OperationDistribution {
 
 impl QueueArg {
     fn init(&self) -> DRa<usize> {
+        self.config.init(self.partials)
+    }
+}
+
+impl QueueConfig {
+    fn init(&self, partials: usize) -> DRa<usize> {
         DRa::new(
-            self.partials,
+            partials,
             self.sample_nbr,
             self.sampling == Sampling::Uniques,
             self.heuristic == Heuristic::Operation,
@@ -183,6 +223,56 @@ fn main() {
                         );
                     } else {
                         let queue = queue.init();
+                        results.insert(key, avg(analyze(queue, *pre, &ops_vec)));
+                    }
+                }
+            }
+
+            // Inefficient way to get it to print nicely
+            let string_keyed_results: HashMap<String, f32> = results
+                .into_iter()
+                .map(|((pre, ops), avg)| (format!("({pre}, {ops})"), avg))
+                .collect();
+            let serialized_output = serde_json::to_string_pretty(&string_keyed_results)
+                .expect("Could not serialize the output.");
+
+            let timestamp = Local::now().format("%Y%m%d-%H%M%S").to_string();
+            // TODO: Don't always save it in results, in case we want to run from somewhere else
+            let folder = "results";
+            let path = PathBuf::from(folder).join(format!("{output_name}-{timestamp}.json"));
+
+            // Create directory and file
+            create_dir_all(folder).expect("Could not create the results dir");
+            let mut file = File::create(&path).expect("Failed to create file");
+            file.write_all(serialized_output.as_bytes())
+                .expect("Failed to write output to file");
+
+            println!("Writing output to: {}", path.to_string_lossy());
+        }
+        Test::PartialsAndPrefill {
+            queue,
+            operations,
+            partials,
+            prefill,
+            operations_distribution,
+            output_name,
+        } => {
+            let mut results: HashMap<(usize, usize), _> = HashMap::new();
+            let ops_vec = match operations_distribution {
+                OperationDistribution::RandomBalanced => (0..operations)
+                    .map(|_| rand::thread_rng().gen_bool(0.5))
+                    .collect(),
+                OperationDistribution::Alternating => (0..operations).map(|i| i % 2 == 0).collect(),
+            };
+            for p in partials.iter() {
+                for pre in prefill.iter() {
+                    let key = (*p, *pre);
+                    if results.contains_key(&key) {
+                        eprintln!(
+                            "WARNING: Duplicate partials {p} or prefill {pre} in cli arguments!"
+                        );
+                    } else {
+                        let queue = queue.init(*p);
                         results.insert(key, avg(analyze(queue, *pre, &ops_vec)));
                     }
                 }
