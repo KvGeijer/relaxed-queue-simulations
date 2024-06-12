@@ -1,13 +1,16 @@
 use std::{
-    collections::HashMap,
+    collections::HashSet,
     fs::{create_dir_all, File},
     io::Write,
     path::PathBuf,
+    process,
+    sync::Arc,
 };
 
 use chrono::Local;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use rand::Rng;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use relaxation_analysis::{analyze, DRa};
 
 #[derive(Parser, Debug)]
@@ -207,29 +210,33 @@ fn main() {
             operations_distribution,
             output_name,
         } => {
-            let mut results: HashMap<(usize, usize), _> = HashMap::new();
-            for ops in operations.iter() {
-                let ops_vec = match operations_distribution {
-                    OperationDistribution::RandomBalanced => (0..*ops)
-                        .map(|_| rand::thread_rng().gen_bool(0.5))
-                        .collect(),
-                    OperationDistribution::Alternating => (0..*ops).map(|i| i % 2 == 0).collect(),
-                };
-                for pre in prefill.iter() {
-                    let key = (*pre, *ops);
-                    if results.contains_key(&key) {
-                        eprintln!(
-                            "WARNING: Duplicate ops {ops} or prefill {pre} in cli arguments!"
-                        );
-                    } else {
-                        let queue = queue.init();
-                        results.insert(key, avg(analyze(queue, *pre, &ops_vec)));
-                    }
-                }
-            }
+            assert_uniques(&operations);
+            assert_uniques(&prefill);
+            let shared_queue = Arc::new(queue);
+
+            let results: Vec<((usize, usize), f32)> = operations
+                .par_iter()
+                .flat_map(|ops| {
+                    let ops_vec = Arc::new(match operations_distribution {
+                        OperationDistribution::RandomBalanced => (0..*ops)
+                            .map(|_| rand::thread_rng().gen_bool(0.5))
+                            .collect(),
+                        OperationDistribution::Alternating => {
+                            (0..*ops).map(|i| i % 2 == 0).collect()
+                        }
+                    });
+                    let shared_queue = shared_queue.clone();
+                    prefill.par_iter().map(move |pre| {
+                        let key = (*pre, *ops);
+                        let queue = Arc::clone(&shared_queue).init();
+                        let mean = avg(analyze(queue, *pre, &ops_vec));
+                        (key, mean)
+                    })
+                })
+                .collect();
 
             // Inefficient way to get it to print nicely
-            let string_keyed_results: HashMap<String, f32> = results
+            let string_keyed_results: Vec<(String, f32)> = results
                 .into_iter()
                 .map(|((pre, ops), avg)| (format!("({pre}, {ops})"), avg))
                 .collect();
@@ -257,29 +264,30 @@ fn main() {
             operations_distribution,
             output_name,
         } => {
-            let mut results: HashMap<(usize, usize), _> = HashMap::new();
+            assert_uniques(&prefill);
+            assert_uniques(&partials);
+
             let ops_vec = match operations_distribution {
                 OperationDistribution::RandomBalanced => (0..operations)
                     .map(|_| rand::thread_rng().gen_bool(0.5))
                     .collect(),
                 OperationDistribution::Alternating => (0..operations).map(|i| i % 2 == 0).collect(),
             };
-            for p in partials.iter() {
-                for pre in prefill.iter() {
-                    let key = (*p, *pre);
-                    if results.contains_key(&key) {
-                        eprintln!(
-                            "WARNING: Duplicate partials {p} or prefill {pre} in cli arguments!"
-                        );
-                    } else {
+
+            let results: Vec<((usize, usize), f32)> = partials
+                .par_iter()
+                .flat_map(|p| {
+                    prefill.par_iter().map(|pre| {
+                        let key = (*p, *pre);
                         let queue = queue.init(*p);
-                        results.insert(key, avg(analyze(queue, *pre, &ops_vec)));
-                    }
-                }
-            }
+                        let mean = avg(analyze(queue, *pre, &ops_vec));
+                        (key, mean)
+                    })
+                })
+                .collect();
 
             // Inefficient way to get it to print nicely
-            let string_keyed_results: HashMap<String, f32> = results
+            let string_keyed_results: Vec<(String, f32)> = results
                 .into_iter()
                 .map(|((pre, ops), avg)| (format!("({pre}, {ops})"), avg))
                 .collect();
@@ -298,6 +306,21 @@ fn main() {
                 .expect("Failed to write output to file");
 
             println!("Writing output to: {}", path.to_string_lossy());
+        }
+    }
+}
+
+/// Exits the program if the sent in vector has any duplicates.
+fn assert_uniques<I, T>(iter: I)
+where
+    I: IntoIterator<Item = T>,
+    T: PartialEq + Eq + std::hash::Hash,
+{
+    let mut seen = HashSet::new();
+    for item in iter {
+        if !seen.insert(item) {
+            eprintln!("Duplicate found. Exiting program.");
+            process::exit(1); // Exit with an error code.
         }
     }
 }
