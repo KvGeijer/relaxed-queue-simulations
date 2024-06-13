@@ -11,13 +11,14 @@ def parse_arguments():
     parser.add_argument('-o', '--operations', type=int, required=True, help='Number of operations')
     parser.add_argument('-p', '--partials', type=int, nargs='+', required=True, help='partials list')
     parser.add_argument('-i', '--prefill', type=int, nargs='+', required=True, help='prefill list')
-    parser.add_argument('-h', '--heuristic', type=str, nargs='+', required=True, help='heuristic [length/operation]')
+    parser.add_argument('--heuristic', type=str, default="length", help='heuristic (length/operation) [Default=length]')
+    parser.add_argument('-r', '--runs', type=int, default=1, help='The number of runs to do for each data point [Default = 1]')
     return parser.parse_args()
 
-def run_rust_test(operations, partials, prefill):
+def run_rust_test(operations, partials, prefill, runs, heuristic):
     partials_str = ' '.join(map(str, partials))
     prefill_str = ' '.join(map(str, prefill))
-    command = f"cargo run -- partials-and-prefill -o {operations} -p {partials_str} -i {prefill_str}"
+    command = f"cargo run -- partials-and-prefill -o {operations} -p {partials_str} -i {prefill_str} -r {runs} --heuristic {heuristic}"
     result = subprocess.run(command, capture_output=True, text=True, shell=True)
     if result.returncode != 0:
         print("Error running the Rust command")
@@ -42,7 +43,7 @@ def parse_and_transform_data(data):
     x_vals = []
     y_vals = []
     z_vals = []
-    for key, value in data.items():
+    for key, value in data:
         p, it = eval(key)
         x_vals.append(p)
         y_vals.append(it)
@@ -67,7 +68,7 @@ def plot_heatmap(x, y, z):
 
 def main():
     args = parse_arguments()
-    output = run_rust_test(args.operations, args.partials, args.prefill)
+    output = run_rust_test(args.operations, args.partials, args.prefill, args.runs, args.heuristic)
     file_path = extract_file_path(output)
     data = read_data(file_path)
     x, y, z = parse_and_transform_data(data)
