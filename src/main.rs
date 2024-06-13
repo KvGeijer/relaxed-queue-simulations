@@ -197,8 +197,8 @@ fn main() {
             let operations = (0..operations)
                 .map(|_| rand::thread_rng().gen_bool(0.5))
                 .collect();
-            let queue = queue.init();
-            let avg_error = avg(analyze(queue, prefill, &operations));
+            let mut queue = queue.init();
+            let avg_error = avg(analyze(&mut queue, prefill, &operations));
             println!("{avg_error}");
         }
         Test::SingleAlternating {
@@ -207,9 +207,11 @@ fn main() {
             prefill,
         } => {
             let operations = (0..2 * operations).map(|i| i % 2 == 0).collect();
-            let queue = queue.init();
-            let avg_error = avg(analyze(queue, prefill, &operations));
+            let mut queue = queue.init();
+            let errors = analyze(&mut queue, prefill, &operations);
+            let avg_error = avg(errors);
             println!("{avg_error}");
+            // queue.print_skewness();
         }
         Test::OpsAndPrefill {
             queue,
@@ -241,8 +243,8 @@ fn main() {
                         let mean: f32 = (0..runs)
                             .into_par_iter()
                             .map(|_| {
-                                let queue = shared_queue.init();
-                                let mean = avg(analyze(queue, *pre, &ops_vec));
+                                let mut queue = shared_queue.init();
+                                let mean = avg(analyze(&mut queue, *pre, &ops_vec));
                                 mean
                             })
                             .reduce(|| 0.0, |a, b| a + b)
@@ -300,8 +302,8 @@ fn main() {
                         let mean = (0..runs)
                             .into_par_iter()
                             .map(|_| {
-                                let queue = queue.init(*p);
-                                avg(analyze(queue, *pre, &ops_vec))
+                                let mut queue = queue.init(*p);
+                                avg(analyze(&mut queue, *pre, &ops_vec))
                             })
                             .reduce(|| 0.0, |a, b| a + b)
                             / runs as f32;

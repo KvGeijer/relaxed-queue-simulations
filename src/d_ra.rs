@@ -97,6 +97,37 @@ impl<T: PartialEq + Eq> DRa<T> {
                 .collect()
         }
     }
+
+    pub fn print_skewness(&self) {
+        let (mean_head, std_head) =
+            std(&self.partials.iter().map(|p| p.head).collect::<Vec<usize>>());
+        let (mean_tail, std_tail) =
+            std(&self.partials.iter().map(|p| p.tail).collect::<Vec<usize>>());
+        println!("Mean head: {mean_head}, std: {std_head}");
+        println!("Mean tail: {mean_tail}, std: {std_tail}");
+        print!("Heads: ");
+        for p in self.partials.iter() {
+            print!(" {}", p.head);
+        }
+        println!("");
+        print!("Tails: ");
+        for p in self.partials.iter() {
+            print!(" {}", p.tail);
+        }
+        println!("");
+    }
+}
+
+fn std(values: &Vec<usize>) -> (f32, f32) {
+    let mean = values.iter().cloned().sum::<usize>() as f32 / values.len() as f32;
+    let std = (values
+        .iter()
+        .map(|val| (*val as f32 - mean) * (*val as f32 - mean))
+        .sum::<f32>()
+        / values.len() as f32)
+        .sqrt();
+
+    (mean, std)
 }
 
 struct Partial<T: PartialEq + Eq> {

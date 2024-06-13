@@ -4,15 +4,12 @@ use crate::relaxed_fifo::RelaxedFifo;
 
 /// Analyze a relaxed queue (passed empty), returning all rank errors for the operations
 pub fn analyze(
-    empty_queue: impl RelaxedFifo<usize>,
+    relaxed_queue: &mut impl RelaxedFifo<usize>,
     prefill: usize,
     operations: &Vec<bool>,
 ) -> Vec<usize> {
     // Keep an ordered queue to the side
     let mut strict_queue = StrictQueue::new();
-
-    // Keep empty in parameter name to make it super clear
-    let mut relaxed_queue = empty_queue;
 
     for item in 0..prefill {
         // Prefill
