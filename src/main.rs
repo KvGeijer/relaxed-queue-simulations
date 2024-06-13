@@ -10,7 +10,7 @@ use std::{
 use chrono::Local;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use rand::Rng;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use relaxation_analysis::{analyze, DRa};
 
 #[derive(Parser, Debug)]
@@ -70,9 +70,13 @@ enum Test {
         #[arg(value_enum, long = "ops-distr", default_value_t = OperationDistribution::RandomBalanced)]
         operations_distribution: OperationDistribution,
 
-        /// The name of the output json file, ends up at "results/{name}-{datetime}.json"
+        /// The name of the output json file, ends up at "results/{output_name}-{datetime}.json"
         #[arg(long, default_value_t = format!("OpsAndPrefill"))]
         output_name: String,
+
+        /// The number of runs to average over for each data point
+        #[arg(short, long, default_value_t = 1)]
+        runs: usize,
     },
 
     /// Tests all combinations of partial queues and prefill
@@ -97,9 +101,13 @@ enum Test {
         #[arg(value_enum, long = "ops-distr", default_value_t = OperationDistribution::RandomBalanced)]
         operations_distribution: OperationDistribution,
 
-        /// The name of the output json file, ends up at "results/{name}-{datetime}.json"
+        /// The name of the output json file, ends up at "results/{output_name}-{datetime}.json"
         #[arg(long, default_value_t = format!("PartialsAndPrefill"))]
         output_name: String,
+
+        /// The number of runs to average over for each data point
+        #[arg(short, long, default_value_t = 1)]
+        runs: usize,
     },
 }
 
@@ -209,6 +217,7 @@ fn main() {
             prefill,
             operations_distribution,
             output_name,
+            runs,
         } => {
             assert_uniques(&operations);
             assert_uniques(&prefill);
@@ -227,9 +236,17 @@ fn main() {
                     });
                     let shared_queue = shared_queue.clone();
                     prefill.par_iter().map(move |pre| {
+                        let shared_queue = shared_queue.clone();
                         let key = (*pre, *ops);
-                        let queue = Arc::clone(&shared_queue).init();
-                        let mean = avg(analyze(queue, *pre, &ops_vec));
+                        let mean: f32 = (0..runs)
+                            .into_par_iter()
+                            .map(|_| {
+                                let queue = shared_queue.init();
+                                let mean = avg(analyze(queue, *pre, &ops_vec));
+                                mean
+                            })
+                            .reduce(|| 0.0, |a, b| a + b)
+                            / runs as f32;
                         (key, mean)
                     })
                 })
@@ -263,6 +280,7 @@ fn main() {
             prefill,
             operations_distribution,
             output_name,
+            runs,
         } => {
             assert_uniques(&prefill);
             assert_uniques(&partials);
@@ -279,8 +297,14 @@ fn main() {
                 .flat_map(|p| {
                     prefill.par_iter().map(|pre| {
                         let key = (*p, *pre);
-                        let queue = queue.init(*p);
-                        let mean = avg(analyze(queue, *pre, &ops_vec));
+                        let mean = (0..runs)
+                            .into_par_iter()
+                            .map(|_| {
+                                let queue = queue.init(*p);
+                                avg(analyze(queue, *pre, &ops_vec))
+                            })
+                            .reduce(|| 0.0, |a, b| a + b)
+                            / runs as f32;
                         (key, mean)
                     })
                 })
