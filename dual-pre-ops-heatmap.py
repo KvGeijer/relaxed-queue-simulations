@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 
+from matplotlib.colors import LogNorm
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -21,6 +23,8 @@ def parse_arguments():
                         help='Path to length JSON file')
     parser.add_argument('-r', '--runs', type=int, default=1,
                         help='The number of runs to do for each data point [Default = 1]')
+    parser.add_argument('-s', '--save_path', type=str,
+                        help='Saves the heatmaps, to this path if supplied.')
     return parser.parse_args()
 
 
@@ -75,7 +79,7 @@ def parse_and_transform_data(operation_data, length_data):
     return transform(operation_data), transform(length_data)
 
 
-def plot_heatmap(operation_data, length_data, titles=['Length Heuristic', 'Operation Heuristic']):
+def plot_heatmap(operation_data, length_data, save_path, titles=['Length Heuristic', 'Operation Heuristic']):
     fig, axes = plt.subplots(ncols=2, width_ratios=[
                              0.45, 0.55], sharey=True, figsize=(6, 3))
     data_sets = [length_data, operation_data]
@@ -97,9 +101,31 @@ def plot_heatmap(operation_data, length_data, titles=['Length Heuristic', 'Opera
 
         # Plot heatmap, show color bar only on the last subplot
         sns.heatmap(data_pivot, annot=False, fmt=".2f", ax=ax,
-                    xticklabels=y_unique, yticklabels=(
-                        x_unique if ax_idx == 1 else False),
-                    vmin=vmin, vmax=vmax, cbar=ax_idx == len(axes)-1)
+                    # Needed to not get ugly lines in pdf plot: https://stackoverflow.com/questions/27040557/remove-lines-separating-cells-in-seaborn-heatmap-when-saved-as-pdf
+                    rasterized=True,
+                    norm=LogNorm(vmin=vmin, vmax=vmax),
+                    vmin=vmin, vmax=vmax, cbar=ax_idx == len(axes)-1,
+                    cbar_kws={'label': 'Average Rank Error'})
+
+        # Can include every value if you want
+        x_ticks = list(range(0, len(x_unique)))[::2]
+        y_ticks = list(range(0, len(y_unique)))[::2]
+        x_tick_labels = y_unique
+        y_tick_labels = x_unique
+        # Remove comments to get power of two formatting
+        # x_tick_labels = [r"$2^{{{}}}$".format(
+        #     int(np.log2(value + 1))) for value in x_unique]
+        # y_tick_labels = [r"$2^{{{}}}$".format(
+        #     int(np.log2(value + 1))) for value in y_unique]
+        x_tick_labels = [x_tick_labels[i] for i in x_ticks]
+        y_tick_labels = [y_tick_labels[i] for i in y_ticks]
+        ax.set_xticks([x + 0.5 for x in x_ticks])
+        ax.set_yticks([y + 0.5 for y in y_ticks])
+        # Change to 0, 45 or 90 depending on what you need
+        ax.set_xticklabels(x_tick_labels, rotation=90)
+        # Change to 0, 45 or 90 depending on what you need
+        ax.set_yticklabels(y_tick_labels, rotation=0)
+
         ax.set_title(title)
         ax.set_xlabel('prefill')
         if ax_idx == 0:
@@ -107,6 +133,9 @@ def plot_heatmap(operation_data, length_data, titles=['Length Heuristic', 'Opera
 
     plt.tight_layout()
     plt.show()
+
+    if save_path:
+        fig.savefig(save_path)
 
 
 def main():
@@ -135,7 +164,7 @@ def main():
     # Parse and plot data
     operation_data_parsed, length_data_parsed = parse_and_transform_data(
         operation_data, length_data)
-    plot_heatmap(operation_data_parsed, length_data_parsed)
+    plot_heatmap(operation_data_parsed, length_data_parsed, args.save_path)
 
 
 if __name__ == "__main__":
