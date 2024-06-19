@@ -9,9 +9,9 @@ use std::{
 
 use chrono::Local;
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use rand::Rng;
+use rand::{seq::SliceRandom, thread_rng, Rng};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use relaxation_analysis::{analyze, DRa};
+use relaxation_analysis::{analyze_distributions, analyze_simple, DRa};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -109,6 +109,32 @@ enum Test {
         #[arg(short, long, default_value_t = 1)]
         runs: usize,
     },
+
+    Distributions {
+        /// The queue configuration to use
+        #[command(flatten)]
+        queue: QueueArg,
+
+        /// The number of operations to run
+        #[arg(short, long = "ops")]
+        operations: usize,
+
+        /// The number of initial items in the queue before starting the experiment
+        #[arg(short = 'i', long)]
+        prefill: usize,
+
+        /// How to generate the operations
+        #[arg(value_enum, long = "ops-distr", default_value_t = OperationDistribution::RandomBalanced)]
+        operations_distribution: OperationDistribution,
+
+        /// The name of the output json file, ends up at "results/{output_name}-{datetime}.json"
+        #[arg(long, default_value_t = format!("Distributions"))]
+        output_name: String,
+
+        /// The number of runs to average over for each data point
+        #[arg(short, long, default_value_t = 1)]
+        runs: usize,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -198,7 +224,7 @@ fn main() {
                 .map(|_| rand::thread_rng().gen_bool(0.5))
                 .collect();
             let mut queue = queue.init();
-            let avg_error = avg(analyze(&mut queue, prefill, &operations));
+            let avg_error = avg(analyze_simple(&mut queue, prefill, &operations));
             println!("{avg_error}");
         }
         Test::SingleAlternating {
@@ -208,7 +234,7 @@ fn main() {
         } => {
             let operations = (0..2 * operations).map(|i| i % 2 == 0).collect();
             let mut queue = queue.init();
-            let errors = analyze(&mut queue, prefill, &operations);
+            let errors = analyze_simple(&mut queue, prefill, &operations);
             let avg_error = avg(errors);
             println!("{avg_error}");
             // queue.print_skewness();
@@ -228,14 +254,7 @@ fn main() {
             let results: Vec<((usize, usize), f32)> = operations
                 .par_iter()
                 .flat_map(|ops| {
-                    let ops_vec = Arc::new(match operations_distribution {
-                        OperationDistribution::RandomBalanced => (0..*ops)
-                            .map(|_| rand::thread_rng().gen_bool(0.5))
-                            .collect(),
-                        OperationDistribution::Alternating => {
-                            (0..*ops).map(|i| i % 2 == 0).collect()
-                        }
-                    });
+                    let ops_vec = Arc::new(gen_ops(operations_distribution, *ops));
                     let shared_queue = shared_queue.clone();
                     prefill.par_iter().map(move |pre| {
                         let shared_queue = shared_queue.clone();
@@ -244,7 +263,7 @@ fn main() {
                             .into_par_iter()
                             .map(|_| {
                                 let mut queue = shared_queue.init();
-                                let mean = avg(analyze(&mut queue, *pre, &ops_vec));
+                                let mean = avg(analyze_simple(&mut queue, *pre, &ops_vec));
                                 mean
                             })
                             .reduce(|| 0.0, |a, b| a + b)
@@ -287,12 +306,7 @@ fn main() {
             assert_uniques(&prefill);
             assert_uniques(&partials);
 
-            let ops_vec = match operations_distribution {
-                OperationDistribution::RandomBalanced => (0..operations)
-                    .map(|_| rand::thread_rng().gen_bool(0.5))
-                    .collect(),
-                OperationDistribution::Alternating => (0..operations).map(|i| i % 2 == 0).collect(),
-            };
+            let ops_vec = gen_ops(operations_distribution, operations);
 
             let results: Vec<((usize, usize), f32)> = partials
                 .par_iter()
@@ -303,7 +317,7 @@ fn main() {
                             .into_par_iter()
                             .map(|_| {
                                 let mut queue = queue.init(*p);
-                                avg(analyze(&mut queue, *pre, &ops_vec))
+                                avg(analyze_simple(&mut queue, *pre, &ops_vec))
                             })
                             .reduce(|| 0.0, |a, b| a + b)
                             / runs as f32;
@@ -333,6 +347,98 @@ fn main() {
 
             println!("Writing output to: {}", path.to_string_lossy());
         }
+        Test::Distributions {
+            queue,
+            operations,
+            prefill,
+            output_name,
+            runs,
+            operations_distribution,
+        } => {
+            let ops_vec = gen_ops(operations_distribution, operations);
+
+            // Average each data point in the distributions over all the runs
+            let mut rank_errors = vec![0f32; operations / 2];
+            let mut enq_deq_diffs = vec![0f32; operations / 2];
+            let mut partial_deq_diffs = vec![0f32; operations / 2];
+            let mut partial_enq_diffs = vec![0f32; operations / 2];
+
+            let results: Vec<_> = (0..runs)
+                .into_par_iter()
+                .map(|_| {
+                    let mut queue = queue.init();
+                    analyze_distributions(&mut queue, prefill, &ops_vec)
+                })
+                .collect();
+
+            results.into_iter().for_each(
+                |(
+                    new_rank_errors,
+                    new_enq_deq_diffs,
+                    new_partial_deq_diffs,
+                    new_partial_enq_diffs,
+                )| {
+                    // Sum up all values in each x point
+                    for i in 0..rank_errors.len() {
+                        rank_errors[i] += new_rank_errors[i];
+                        enq_deq_diffs[i] += new_enq_deq_diffs[i];
+                        partial_deq_diffs[i] += new_partial_deq_diffs[i];
+                        partial_enq_diffs[i] += new_partial_enq_diffs[i];
+                    }
+                },
+            );
+
+            // Average the values
+            rank_errors
+                .iter_mut()
+                .for_each(|item| *item = *item / runs as f32);
+            enq_deq_diffs
+                .iter_mut()
+                .for_each(|item| *item = *item / runs as f32);
+            partial_deq_diffs
+                .iter_mut()
+                .for_each(|item| *item = *item / runs as f32);
+            partial_enq_diffs
+                .iter_mut()
+                .for_each(|item| *item = *item / runs as f32);
+
+            let string_keyed_results = [
+                ("Rank Errors", rank_errors),
+                ("Enq-Deq id difference", enq_deq_diffs),
+                ("Deq load offset", partial_deq_diffs),
+                ("Enq load offset", partial_enq_diffs),
+            ];
+
+            let serialized_output = serde_json::to_string_pretty(&string_keyed_results)
+                .expect("Could not serialize the output.");
+
+            let timestamp = Local::now().format("%Y%m%d-%H%M%S").to_string();
+            // TODO: Don't always save it in results, in case we want to run from somewhere else
+            let folder = "results";
+            let path = PathBuf::from(folder).join(format!("{output_name}-{timestamp}.json"));
+
+            // Create directory and file
+            create_dir_all(folder).expect("Could not create the results dir");
+            let mut file = File::create(&path).expect("Failed to create file");
+            file.write_all(serialized_output.as_bytes())
+                .expect("Failed to write output to file");
+
+            println!("Writing output to: {}", path.to_string_lossy());
+        }
+    }
+}
+
+fn gen_ops(distr: OperationDistribution, operations: usize) -> Vec<bool> {
+    match distr {
+        OperationDistribution::RandomBalanced => {
+            let mut ops_vec: Vec<bool> = std::iter::repeat(true)
+                .take(operations / 2)
+                .chain(std::iter::repeat(false).take(operations / 2))
+                .collect();
+            ops_vec.shuffle(&mut thread_rng());
+            ops_vec
+        }
+        OperationDistribution::Alternating => (0..operations).map(|i| i % 2 == 0).collect(),
     }
 }
 

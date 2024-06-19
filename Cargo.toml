@@ -7,6 +7,7 @@ description = "A tool for simulating the relaxation behavior of a simplified FIF
 [dependencies]
 chrono = "0.4.38"
 clap = { version = "4.5.4", features = ["derive"] }
+num-traits = "0.2.19"
 rand = "0.8.5"
 rayon = "1.10.0"
 serde = { version = "1.0.203", features = ["derive"] }

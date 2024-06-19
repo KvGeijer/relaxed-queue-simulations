@@ -83,6 +83,35 @@ impl<T: PartialEq + Eq> DRa<T> {
         }
     }
 
+    /// As dequeue, but also returns the number of successfull dequeues on the chosen partial queue
+    pub fn dequeue_with_info(&mut self) -> (Option<T>, usize) {
+        // Find partial ind, depending on heuristic used (this is not super optimized)
+        let partial_ind = if self.progress_heuristic {
+            self.partial_inds()
+                .into_iter()
+                .min_by_key(|ind| self.partials[*ind].head)
+        } else {
+            self.partial_inds()
+                .into_iter()
+                .max_by_key(|ind| self.partials[*ind].tail - self.partials[*ind].head)
+        }
+        .expect("Should always be able to find an index if d>0");
+
+        match self.partials[partial_ind].dequeue() {
+            None if self.empty_lin => {
+                let mut ind = partial_ind;
+                for _ in 0..self.partials.len() - 1 {
+                    ind = (ind + 1) % self.partials.len();
+                    if self.partials[ind].len() > 0 {
+                        return (self.partials[ind].dequeue(), self.partials[ind].head);
+                    }
+                }
+                (None, self.partials[partial_ind].head)
+            }
+            otherwise => (otherwise, self.partials[partial_ind].head),
+        }
+    }
+
     /// Gets partial inds, depending on allowing repeats of not
     fn partial_inds(&self) -> Vec<usize> {
         if self.uniques {
@@ -115,6 +144,10 @@ impl<T: PartialEq + Eq> DRa<T> {
             print!(" {}", p.tail);
         }
         println!("");
+    }
+
+    pub fn nbr_partials(&self) -> usize {
+        self.partials.len()
     }
 }
 

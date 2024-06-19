@@ -1,95 +1,88 @@
-use std::collections::VecDeque;
+use crate::{analyze_extra, DRa, ErrorTag};
 
-use crate::relaxed_fifo::RelaxedFifo;
-
-/// Analyze a relaxed queue (passed empty), returning all rank errors for the operations
-pub fn analyze(
-    relaxed_queue: &mut impl RelaxedFifo<usize>,
+/// Analyze relaxation properties of a relaxed queue (passed empty)
+///
+/// Returns sorted discrite probability density functions (pdf). These each have pdf_samples samples.
+/// Pdfs returned: (
+///     - Rank errors,
+///     - Difference of enqueue nbr and dequeue nbr (for non-empty returns only),
+///     - Difference between the partial queue load and average load at dequeue,
+///     - Difference between the partial queue load and average load at enqueue (sampled from returned items),
+/// )
+pub fn analyze_distributions(
+    relaxed_queue: &mut DRa<usize>,
     prefill: usize,
     operations: &Vec<bool>,
-) -> Vec<usize> {
-    // Keep an ordered queue to the side
-    let mut strict_queue = StrictQueue::new();
+) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+    let error_tags = analyze_extra(relaxed_queue, prefill, operations);
 
-    for item in 0..prefill {
-        // Prefill
-        strict_queue.enqueue(item);
-        relaxed_queue.enqueue(item);
-    }
+    let mut rank_errors: Vec<usize> = error_tags.iter().map(|tag| tag.rank_error()).collect();
+    rank_errors.sort();
 
-    let mut rank_errors = vec![];
-    let mut enq_nbr = prefill;
+    let mut enq_deq_diffs: Vec<i64> = error_tags
+        .iter()
+        .filter_map(|tag| match tag {
+            ErrorTag::ItemDequeue {
+                enq_nbr, deq_nbr, ..
+            } => Some(*enq_nbr as i64 - *deq_nbr as i64),
+            ErrorTag::EmptyDequeue { .. } => None,
+        })
+        .collect();
+    enq_deq_diffs.sort();
 
-    for op in operations {
-        if *op {
-            // Enqueue
-            strict_queue.enqueue(enq_nbr);
-            relaxed_queue.enqueue(enq_nbr);
-            enq_nbr += 1;
-        } else {
-            // Dequeue
-            if let Some(item) = relaxed_queue.dequeue() {
-                rank_errors.push(strict_queue.relaxed_dequeue(item));
-            } else {
-                // Treat empty returns as real operations (some queues might not be empty linearizable)
-                rank_errors.push(strict_queue.len());
+    let mut partial_deq_diff: Vec<f32> = error_tags
+        .iter()
+        .map(|tag| {
+            // TODO: Should it be deq_nbr - 1? Too tired when writing
+            let mean = tag.deq_nbr() as f32 / relaxed_queue.nbr_partials() as f32;
+            tag.partial_nbr() as f32 - mean
+        })
+        .collect();
+    partial_deq_diff.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let mut partial_enq_diff: Vec<f32> = error_tags
+        .iter()
+        .filter_map(|tag| match tag {
+            ErrorTag::ItemDequeue {
+                enq_nbr,
+                partial_nbr,
+                ..
+            } => {
+                let mean = *enq_nbr as f32 / relaxed_queue.nbr_partials() as f32;
+                Some(*partial_nbr as f32 - mean)
             }
-        }
-    }
+            ErrorTag::EmptyDequeue { .. } => None,
+        })
+        .collect();
+    partial_enq_diff.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-    rank_errors
+    (
+        rank_errors.into_iter().map(|val| val as f32).collect(),
+        enq_deq_diffs.into_iter().map(|val| val as f32).collect(),
+        partial_deq_diff,
+        partial_enq_diff,
+    )
+    // (
+    //     into_pdf(rank_errors, pdf_samples),
+    //     into_pdf(enq_deq_diffs, pdf_samples),
+    //     into_pdf(partial_deq_diff, pdf_samples),
+    //     into_pdf(partial_enq_diff, pdf_samples),
+    // )
 }
 
-struct StrictQueue {
-    deque: VecDeque<(usize, bool)>,
-    len: usize,
-}
+// /// Takes a sorted vector of values and samples it into a pdf (using mean)
+// fn into_pdf<T: num_traits::AsPrimitive<f32> + Sum<T> + Clone>(
+//     values: Vec<T>,
+//     samples: usize,
+// ) -> Vec<f32> {
+//     let per_sample = values.len() as f32 / samples as f32;
 
-impl StrictQueue {
-    fn new() -> Self {
-        Self {
-            deque: VecDeque::new(),
-            len: 0,
-        }
-    }
+//     (0..samples)
+//         .map(|i| {
+//             let start = (per_sample * i as f32).round() as usize;
+//             let stop = (per_sample * (i + 1) as f32).round() as usize;
 
-    fn enqueue(&mut self, item: usize) {
-        self.deque.push_back((item, true));
-        self.len += 1;
-    }
-
-    /// Returns the relaxation distance of the dequeued item
-    fn relaxed_dequeue(&mut self, item: usize) -> usize {
-        // Always decrease len by 1 when dequeueing an item
-        assert!(self.len > 0, "Cannot dequeue from an empty strict queue");
-        self.len -= 1;
-
-        if self.deque.front().expect("Item must exist").0 == item {
-            // Relaxation error is 0, and we can empty the deque
-            self.deque.pop_front();
-            loop {
-                match self.deque.front() {
-                    Some((_item, false)) => self.deque.pop_front(),
-                    _ => return 0,
-                };
-            }
-        } else {
-            // The item is not first, so don't have to worry about removing old garbage
-            let mut rank_error = 0;
-            for (other, exists) in self.deque.iter_mut() {
-                if *other == item {
-                    *exists = false;
-                    return rank_error;
-                } else if *exists {
-                    rank_error += 1;
-                }
-            }
-            panic!("Could not find dequeued item")
-        }
-    }
-
-    /// Returns the number of live items in the queue
-    fn len(&mut self) -> usize {
-        self.len
-    }
-}
+//             values[start..stop].iter().cloned().sum::<T>().as_()
+//         })
+//         .collect()
+// }
