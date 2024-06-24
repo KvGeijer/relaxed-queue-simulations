@@ -18,7 +18,9 @@ def parse_arguments():
     parser.add_argument('-i', '--prefill', type=int,
                         help='Number of items to insert before test start')
     parser.add_argument('-r', '--runs', type=int, default=1,
-                        help='The number of runs to do for each data point [Default = 1]')
+                        help='The number of runs to do for each data point [Possible: average, worst-one-percent] [Default = average]')
+    parser.add_argument('--readout', type=str, default="average",
+                        help='How to read out the error from each simulation [Default = average]')
     parser.add_argument('-s', '--save_path', type=str,
                         help='Saves the graph, to this path if supplied.')
     parser.add_argument('--old_json', type=str,
@@ -26,9 +28,12 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def run_rust_test(operations, partials, prefill, runs):
+def run_rust_test(operations, partials, prefill, runs, readout):
     partials_str = ' '.join(map(str, partials))
-    command = f"cargo run -- partials-and-prefill -o {operations} -p {partials_str} -i {prefill} -r {runs} --heuristic operation"
+    command = (
+        f"cargo run -- partials-and-prefill -o {operations} -p {partials_str} -i {prefill} -r {runs}"
+        f" --heuristic operation --readout {readout}"
+    )
 
     result = subprocess.run(
         command, capture_output=True, text=True, shell=True)
@@ -57,16 +62,16 @@ def read_and_parse_data(filepath):
     return partial_errors
 
 
-def plot_graph(data_points, save_path, title="Heuristic Scalability"):
+def plot_graph(data_points, save_path, error_column, title="Operation Heuristic Scalability"):
     # Create a DataFrame from the list of tuples
-    df = pd.DataFrame(data_points, columns=['Partials', 'Average Rank Error'])
+    df = pd.DataFrame(data_points, columns=['Partials', error_column])
 
     # Apply the seaborn style
     sns.set_theme()
 
     fig, ax = plt.subplots()
     sns.lineplot(data=df, x='Partials',
-                 y='Average Rank Error', ax=ax, marker='o')
+                 y=error_column, ax=ax, marker='o')
 
     # Setting the logarithmic scale for the x-axis with base 2
     ax.set_xscale("log", base=2)
@@ -98,14 +103,16 @@ def main():
 
         # Run Rust command to generate new JSON files
         output = run_rust_test(
-            args.operations, args.partials, args.prefill, args.runs)
+            args.operations, args.partials, args.prefill, args.runs, args.readout)
         file_path = extract_file_path(output)
 
     # Read data from the paths
     data_points = read_and_parse_data(file_path)
 
     # Parse and plot data
-    plot_graph(data_points, args.save_path)
+    error_column = {"average": "Average Rank Error",
+                    "worst-one-percent": "Worst 1% point Rank Error"}[args.readout]
+    plot_graph(data_points, args.save_path, error_column)
 
 
 if __name__ == "__main__":

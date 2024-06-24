@@ -35,7 +35,7 @@ pub fn analyze_distributions(
         .map(|tag| {
             // TODO: Should it be deq_nbr - 1? Too tired when writing
             let mean = tag.deq_nbr() as f32 / relaxed_queue.nbr_partials() as f32;
-            tag.partial_nbr() as f32 - mean
+            tag.partial_nbr() as f32 - 1.0 - mean
         })
         .collect();
     partial_deq_diff.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -49,7 +49,7 @@ pub fn analyze_distributions(
                 ..
             } => {
                 let mean = *enq_nbr as f32 / relaxed_queue.nbr_partials() as f32;
-                Some(*partial_nbr as f32 - mean)
+                Some(*partial_nbr as f32 - 1.0 - mean)
             }
             ErrorTag::EmptyDequeue { .. } => None,
         })

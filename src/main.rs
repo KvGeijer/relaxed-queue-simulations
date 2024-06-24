@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{BinaryHeap, HashSet},
     fs::{create_dir_all, File},
     io::Write,
     path::PathBuf,
@@ -9,7 +9,7 @@ use std::{
 
 use chrono::Local;
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use rand::{seq::SliceRandom, thread_rng, Rng};
+use rand::{seq::SliceRandom, thread_rng};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use relaxation_analysis::{analyze_distributions, analyze_simple, DRa};
 
@@ -22,8 +22,8 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Test {
-    /// Randomly performs enqueue or dequeue operations, testing a single queue
-    SingleRandom {
+    /// Runs a single test
+    Single {
         /// The queue configuration to use
         #[command(flatten)]
         queue: QueueArg,
@@ -35,21 +35,14 @@ enum Test {
         /// The number of initial items in the queue before starting the experiment
         #[arg(short = 'i', long)]
         prefill: usize,
-    },
 
-    /// Performs pairs of enqueue/dequeue operations, testing a single queue
-    SingleAlternating {
-        /// The queue configuration to use
-        #[command(flatten)]
-        queue: QueueArg,
+        /// How to generate the operations
+        #[arg(value_enum, long = "ops-distr", default_value_t = OperationDistribution::RandomBalanced)]
+        operations_distribution: OperationDistribution,
 
-        /// The number of operation pairs to run
-        #[arg(short, long = "ops")]
-        operations: usize,
-
-        /// The number of initial items in the queue before starting the experiment
-        #[arg(short = 'i', long)]
-        prefill: usize,
+        /// How to readout the rank error from a single simulation
+        #[arg(value_enum, long = "readout", default_value_t = ErrorReadout::Average)]
+        error_readout: ErrorReadout,
     },
 
     /// Performsrmany tests for a queue, for combinations of operations and prefill
@@ -77,6 +70,10 @@ enum Test {
         /// The number of runs to average over for each data point
         #[arg(short, long, default_value_t = 1)]
         runs: usize,
+
+        /// How to readout the rank error from a single simulation
+        #[arg(value_enum, long = "readout", default_value_t = ErrorReadout::Average)]
+        error_readout: ErrorReadout,
     },
 
     /// Tests all combinations of partial queues and prefill
@@ -108,6 +105,10 @@ enum Test {
         /// The number of runs to average over for each data point
         #[arg(short, long, default_value_t = 1)]
         runs: usize,
+
+        /// How to readout the rank error from a single simulation
+        #[arg(value_enum, long = "readout", default_value_t = ErrorReadout::Average)]
+        error_readout: ErrorReadout,
     },
 
     Distributions {
@@ -190,6 +191,37 @@ enum OperationDistribution {
     Alternating,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
+enum ErrorReadout {
+    /// Reports the average rank error from each simulation
+    Average,
+
+    /// Reports the data point from each experiment that is at the 99-percentile quantile
+    WorstOnePercent,
+}
+
+impl ErrorReadout {
+    fn readout(&self, nbrs: Vec<usize>) -> f32 {
+        let len = nbrs.len();
+        match self {
+            ErrorReadout::Average => nbrs.into_iter().sum::<usize>() as f32 / len as f32,
+            ErrorReadout::WorstOnePercent => {
+                let track_nbr = len / 100;
+                let mut heap = BinaryHeap::with_capacity(track_nbr);
+                for error in nbrs.into_iter() {
+                    if heap.len() < track_nbr {
+                        heap.push(-(error as i64));
+                    } else if -heap.peek().unwrap() < error as i64 {
+                        heap.pop();
+                        heap.push(-(error as i64));
+                    }
+                }
+                -heap.pop().unwrap() as f32
+            }
+        }
+    }
+}
+
 impl QueueArg {
     fn init(&self) -> DRa<usize> {
         self.config.init(self.partials)
@@ -215,29 +247,17 @@ fn main() {
     // But the length-based one also scales with prefill and nbr_operations
 
     match cli.test {
-        Test::SingleRandom {
+        Test::Single {
             queue,
             operations,
             prefill,
+            operations_distribution,
+            error_readout,
         } => {
-            let operations = (0..operations)
-                .map(|_| rand::thread_rng().gen_bool(0.5))
-                .collect();
+            let operations = gen_ops(operations_distribution, operations);
             let mut queue = queue.init();
-            let avg_error = avg(analyze_simple(&mut queue, prefill, &operations));
+            let avg_error = error_readout.readout(analyze_simple(&mut queue, prefill, &operations));
             println!("{avg_error}");
-        }
-        Test::SingleAlternating {
-            queue,
-            operations,
-            prefill,
-        } => {
-            let operations = (0..2 * operations).map(|i| i % 2 == 0).collect();
-            let mut queue = queue.init();
-            let errors = analyze_simple(&mut queue, prefill, &operations);
-            let avg_error = avg(errors);
-            println!("{avg_error}");
-            // queue.print_skewness();
         }
         Test::OpsAndPrefill {
             queue,
@@ -246,6 +266,7 @@ fn main() {
             operations_distribution,
             output_name,
             runs,
+            error_readout,
         } => {
             assert_uniques(&operations);
             assert_uniques(&prefill);
@@ -263,7 +284,8 @@ fn main() {
                             .into_par_iter()
                             .map(|_| {
                                 let mut queue = shared_queue.init();
-                                let mean = avg(analyze_simple(&mut queue, *pre, &ops_vec));
+                                let mean = error_readout
+                                    .readout(analyze_simple(&mut queue, *pre, &ops_vec));
                                 mean
                             })
                             .reduce(|| 0.0, |a, b| a + b)
@@ -302,6 +324,7 @@ fn main() {
             operations_distribution,
             output_name,
             runs,
+            error_readout,
         } => {
             assert_uniques(&prefill);
             assert_uniques(&partials);
@@ -317,7 +340,7 @@ fn main() {
                             .into_par_iter()
                             .map(|_| {
                                 let mut queue = queue.init(*p);
-                                avg(analyze_simple(&mut queue, *pre, &ops_vec))
+                                error_readout.readout(analyze_simple(&mut queue, *pre, &ops_vec))
                             })
                             .reduce(|| 0.0, |a, b| a + b)
                             / runs as f32;
@@ -455,9 +478,4 @@ where
             process::exit(1); // Exit with an error code.
         }
     }
-}
-
-fn avg(nbrs: Vec<usize>) -> f32 {
-    let len = nbrs.len();
-    nbrs.into_iter().sum::<usize>() as f32 / len as f32
 }
