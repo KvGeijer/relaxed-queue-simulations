@@ -9,44 +9,49 @@ def main():
     # Setting up command line arguments
     parser = argparse.ArgumentParser(
         description="Run cargo command and plot distributions.")
-    parser.add_argument('-p', '--partials', required=True,
+    parser.add_argument('-p', '--partials',
                         help='Partials argument')
-    parser.add_argument('-o', '--operations', required=True,
+    parser.add_argument('-o', '--operations',
                         help='Operations argument')
-    parser.add_argument('-i', '--prefill', required=True,
+    parser.add_argument('-i', '--prefill',
                         help='Prefill argument')
     parser.add_argument('-r', '--runs', help='Runs argument')
     # parser.add_argument('-s', '--distribution_samples',
     #                     help='Distribution samples argument')
+    parser.add_argument('--old_json', type=str,
+                        help='Path to old JSON file containing to plot')
 
     args = parser.parse_args()
 
-    # Constructing the command
-    cmd = [
-        "cargo", "run", "--", "distributions",
-        "-p", args.partials,
-        "-o", args.operations,
-        "-i", args.prefill
-    ]
+    if not args.old_json:
+        # Constructing the command
+        cmd = [
+            "cargo", "run", "--", "distributions",
+            "-p", args.partials,
+            "-o", args.operations,
+            "-i", args.prefill
+        ]
 
-    if args.runs:
-        cmd.extend(["-r", args.runs])
-    # if args.distribution_samples:
-    #     cmd.extend(["-s", args.distribution_samples])
+        if args.runs:
+            cmd.extend(["-r", args.runs])
+        # if args.distribution_samples:
+        #     cmd.extend(["-s", args.distribution_samples])
 
-    # Running the subprocess command
-    print("Running command:", ' '.join(cmd))
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    print(result.stdout)
+        # Running the subprocess command
+        print("Running command:", ' '.join(cmd))
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        print(result.stdout)
 
-    # Extract the file path from the output
-    output_line = [line for line in result.stdout.split(
-        '\n') if "Writing output to:" in line]
-    if not output_line:
-        raise Exception(
-            f"No output file found in the command response.\n{output_line}")
+        # Extract the file path from the output
+        output_line = [line for line in result.stdout.split(
+            '\n') if "Writing output to:" in line]
+        if not output_line:
+            raise Exception(
+                f"No output file found in the command response.\n{output_line}")
 
-    file_path = output_line[0].split(": ")[1].strip()
+        file_path = output_line[0].split(": ")[1].strip()
+    else:
+        file_path = args.old_json
 
     # Load JSON data from the output file
     with open(file_path, 'r') as file:

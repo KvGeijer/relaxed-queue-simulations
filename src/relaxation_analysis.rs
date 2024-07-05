@@ -1,3 +1,5 @@
+use rand::Rng;
+
 use crate::{analyze_extra, DRa, ErrorTag};
 
 /// Analyze relaxation properties of a relaxed queue (passed empty)
@@ -16,7 +18,16 @@ pub fn analyze_distributions(
     prefill: usize,
     operations: &Vec<bool>,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
-    let error_tags = analyze_extra(relaxed_queue, prefill, operations);
+    let extra_ops = rand::thread_rng().gen_range(0..relaxed_queue.nbr_partials());
+    // A bit of a hack, but add some extra enqueue and dequeues at the end to get random mean values of loads
+    let extended_operations = operations
+        .iter()
+        .cloned()
+        .chain(std::iter::repeat(true).take(extra_ops))
+        .chain(std::iter::repeat(false).take(extra_ops))
+        .collect();
+
+    let error_tags = analyze_extra(relaxed_queue, prefill, &extended_operations);
 
     let mut rank_errors: Vec<usize> = error_tags.iter().map(|tag| tag.rank_error()).collect();
     rank_errors.sort();
