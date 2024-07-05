@@ -411,6 +411,8 @@ fn main() {
                         enq_deq_diffs[i] += new_enq_deq_diffs[i];
                         partial_deq_diffs[i] += new_partial_deq_diffs[i];
                         partial_enq_diffs[i] += new_partial_enq_diffs[i];
+                    }
+                    for i in 0..queue.partials {
                         partial_enq_counts[i] += new_partial_enq_counts[i];
                         partial_deq_counts[i] += new_partial_deq_counts[i];
                     }

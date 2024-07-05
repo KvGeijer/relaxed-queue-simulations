@@ -43,7 +43,8 @@ def main():
     output_line = [line for line in result.stdout.split(
         '\n') if "Writing output to:" in line]
     if not output_line:
-        raise Exception("No output file found in the command response.")
+        raise Exception(
+            f"No output file found in the command response.\n{output_line}")
 
     file_path = output_line[0].split(": ")[1].strip()
 
