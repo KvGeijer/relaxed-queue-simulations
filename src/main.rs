@@ -385,6 +385,8 @@ fn main() {
             let mut enq_deq_diffs = vec![0f32; operations / 2];
             let mut partial_deq_diffs = vec![0f32; operations / 2];
             let mut partial_enq_diffs = vec![0f32; operations / 2];
+            let mut partial_deq_counts = vec![0f32; queue.partials];
+            let mut partial_enq_counts = vec![0f32; queue.partials];
 
             let results: Vec<_> = (0..runs)
                 .into_par_iter()
@@ -400,6 +402,8 @@ fn main() {
                     new_enq_deq_diffs,
                     new_partial_deq_diffs,
                     new_partial_enq_diffs,
+                    new_partial_enq_counts,
+                    new_partial_deq_counts,
                 )| {
                     // Sum up all values in each x point
                     for i in 0..rank_errors.len() {
@@ -407,6 +411,8 @@ fn main() {
                         enq_deq_diffs[i] += new_enq_deq_diffs[i];
                         partial_deq_diffs[i] += new_partial_deq_diffs[i];
                         partial_enq_diffs[i] += new_partial_enq_diffs[i];
+                        partial_enq_counts[i] += new_partial_enq_counts[i];
+                        partial_deq_counts[i] += new_partial_deq_counts[i];
                     }
                 },
             );
@@ -424,12 +430,20 @@ fn main() {
             partial_enq_diffs
                 .iter_mut()
                 .for_each(|item| *item = *item / runs as f32);
+            partial_deq_counts
+                .iter_mut()
+                .for_each(|item| *item = *item / runs as f32);
+            partial_enq_counts
+                .iter_mut()
+                .for_each(|item| *item = *item / runs as f32);
 
             let string_keyed_results = [
                 ("Rank Errors", rank_errors),
                 ("Enq-Deq id difference", enq_deq_diffs),
                 ("Deq load offset", partial_deq_diffs),
                 ("Enq load offset", partial_enq_diffs),
+                ("Enqueue partial counts", partial_enq_counts),
+                ("Dequeue partial counts", partial_deq_counts),
             ];
 
             let serialized_output = serde_json::to_string_pretty(&string_keyed_results)

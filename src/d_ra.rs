@@ -149,6 +149,16 @@ impl<T: PartialEq + Eq> DRa<T> {
     pub fn nbr_partials(&self) -> usize {
         self.partials.len()
     }
+
+    /// Returns the number of enqueues done on each partial queue
+    pub fn partial_enqueue_counts(&self) -> Vec<usize> {
+        self.partials.iter().map(|p| p.tail).collect()
+    }
+
+    /// Returns the number of dequeues done on each partial queue
+    pub fn partial_dequeue_counts(&self) -> Vec<usize> {
+        self.partials.iter().map(|p| p.head).collect()
+    }
 }
 
 fn std(values: &Vec<usize>) -> (f32, f32) {

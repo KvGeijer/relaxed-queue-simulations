@@ -8,12 +8,14 @@ use crate::{analyze_extra, DRa, ErrorTag};
 ///     - Difference of enqueue nbr and dequeue nbr (for non-empty returns only),
 ///     - Difference between the partial queue load and average load at dequeue,
 ///     - Difference between the partial queue load and average load at enqueue (sampled from returned items),
+///     - The partial enqueue counts at the end. Subtracted by the mean load, and sorted in ascending order
+///     - The partial dequeue counts at the end. Subtracted by the mean load, and sorted in ascending order
 /// )
 pub fn analyze_distributions(
     relaxed_queue: &mut DRa<usize>,
     prefill: usize,
     operations: &Vec<bool>,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
     let error_tags = analyze_extra(relaxed_queue, prefill, operations);
 
     let mut rank_errors: Vec<usize> = error_tags.iter().map(|tag| tag.rank_error()).collect();
@@ -56,11 +58,31 @@ pub fn analyze_distributions(
         .collect();
     partial_enq_diff.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
+    let mut enqueue_counts = relaxed_queue.partial_enqueue_counts();
+    enqueue_counts.sort();
+    let enqueue_avg =
+        enqueue_counts.iter().cloned().sum::<usize>() as f32 / enqueue_counts.len() as f32;
+    let enqueue_normlized_counts = enqueue_counts
+        .into_iter()
+        .map(|val| val as f32 - enqueue_avg)
+        .collect();
+
+    let mut dequeue_counts = relaxed_queue.partial_dequeue_counts();
+    dequeue_counts.sort();
+    let dequeue_avg =
+        dequeue_counts.iter().cloned().sum::<usize>() as f32 / dequeue_counts.len() as f32;
+    let dequeue_normlized_counts = dequeue_counts
+        .into_iter()
+        .map(|val| val as f32 - dequeue_avg)
+        .collect();
+
     (
         rank_errors.into_iter().map(|val| val as f32).collect(),
         enq_deq_diffs.into_iter().map(|val| val as f32).collect(),
         partial_deq_diff,
         partial_enq_diff,
+        enqueue_normlized_counts,
+        dequeue_normlized_counts,
     )
     // (
     //     into_pdf(rank_errors, pdf_samples),

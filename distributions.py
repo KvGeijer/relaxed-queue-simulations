@@ -73,7 +73,7 @@ def main():
     for i, distribution in enumerate(data):
         name, values = distribution
         sns.kdeplot(values, fill=False, ax=axs[i])
-        axs[i].set_title(f'Probability Density: {name}')
+        axs[i].set_title(f'PDF: {name}')
         axs[i].set_xlabel('Values')
         axs[i].set_ylabel('Density')
 
