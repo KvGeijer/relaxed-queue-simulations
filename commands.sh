@@ -8,4 +8,4 @@ python partial-scaling.py -p 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 -o 1
 python partial-scaling.py -p 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 -o 10000 -i 100000 -r 10 --readout worst-one-percent
 
 # Look at different distributions of properties for dequeues
-python distributions.py -p 1000 -o 100000 -i 100000 -r 100
+python distributions.py -p 1000 -o 100000 -i 10000 -r 5000
