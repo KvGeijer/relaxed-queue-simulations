@@ -66,10 +66,10 @@ def parse_and_transform_data(data):
     x_vals = []
     y_vals = []
     z_vals = []
-    for key, value in data:
-        p, it = eval(key)
-        x_vals.append(p)
-        y_vals.append(it)
+    for pre_ops, value in data:
+        prefill, ops = eval(pre_ops)
+        x_vals.append(prefill)
+        y_vals.append(ops)
         z_vals.append(value)
     return np.array(x_vals), np.array(y_vals), np.array(z_vals)
 
@@ -80,7 +80,7 @@ def plot_heatmap(x, y, z, save_path, title, color_bounds, hide_colorbar):
     else:
         fig, ax = plt.subplots(figsize=(3.8, 3.2))
 
-    data_pivot = np.zeros((len(set(x)), len(set(y))))
+    data_pivot = np.zeros((len(set(y)), len(set(x))))
     x_unique = sorted(set(x))
     y_unique = sorted(set(y))
     x_idx = {v: i for i, v in enumerate(x_unique)}
@@ -93,7 +93,7 @@ def plot_heatmap(x, y, z, save_path, title, color_bounds, hide_colorbar):
         vmin, vmax = color_bounds[0], color_bounds[1]
 
     for xi, yi, zi in zip(x, y, z):
-        data_pivot[x_idx[xi]][y_idx[yi]] = zi
+        data_pivot[y_idx[yi]][x_idx[xi]] = zi
 
     # Plot heatmap
     sns.heatmap(data_pivot, annot=False, fmt=".2f", ax=ax,
