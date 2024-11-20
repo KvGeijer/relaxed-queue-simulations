@@ -76,9 +76,9 @@ def parse_and_transform_data(data):
 
 def plot_heatmap(x, y, z, save_path, title, color_bounds, hide_colorbar):
     if hide_colorbar:
-        fig, ax = plt.subplots(figsize=(2.81, 3.2))
+        fig, ax = plt.subplots(figsize=(3, 3.2))
     else:
-        fig, ax = plt.subplots(figsize=(3.8, 3.2))
+        fig, ax = plt.subplots(figsize=(3.3, 3.2))
 
     data_pivot = np.zeros((len(set(y)), len(set(x))))
     x_unique = sorted(set(x))
@@ -96,12 +96,11 @@ def plot_heatmap(x, y, z, save_path, title, color_bounds, hide_colorbar):
         data_pivot[y_idx[yi]][x_idx[xi]] = zi
 
     # Plot heatmap
-    sns.heatmap(data_pivot, annot=False, fmt=".2f", ax=ax,
-                # Needed to not get ugly lines in pdf plot: https://stackoverflow.com/questions/27040557/remove-lines-separating-cells-in-seaborn-heatmap-when-saved-as-pdf
-                rasterized=True,
-                norm=LogNorm(vmin=vmin, vmax=vmax),
-                vmin=vmin, vmax=vmax, cbar=not hide_colorbar,
-                cbar_kws={'label': 'Average Rank Error'})
+    hmap = sns.heatmap(data_pivot, annot=False, fmt=".2f", ax=ax,
+                       # Needed to not get ugly lines in pdf plot: https://stackoverflow.com/questions/27040557/remove-lines-separating-cells-in-seaborn-heatmap-when-saved-as-pdf
+                       rasterized=True,
+                       norm=LogNorm(vmin=vmin, vmax=vmax),
+                       vmin=vmin, vmax=vmax, cbar=not hide_colorbar)
 
     # Can include every value if you want
     x_ticks = list(range(0, len(x_unique)))[::2]
@@ -123,20 +122,26 @@ def plot_heatmap(x, y, z, save_path, title, color_bounds, hide_colorbar):
 
     if title is not None:
         ax.set_title(title)
-    ax.set_xlabel('prefill')
 
-    if not hide_colorbar:
-        ax.set_ylabel('operations')
+    ax.tick_params(labelsize=11.5)
+
+    ax.set_xlabel('prefill', fontsize=16)
+
+    if hide_colorbar:
+        ax.set_ylabel('operations', fontsize=16)
         ax.set_yticklabels(y_tick_labels, rotation=0)
     else:
         ax.set_yticklabels([])
         # ax.set_yticklabels(None, rotation=0)
+        hmap.collections[0].colorbar.ax.tick_params(labelsize=11.5)
+        hmap.collections[0].colorbar.set_label(
+            'Average Rank Error', fontsize=16)
 
-    plt.tight_layout()
+    plt.tight_layout(pad=0)
     plt.show()
 
     if save_path:
-        fig.savefig(save_path)
+        fig.savefig(f'{save_path}.pdf', format='pdf')
 
 
 def main():
