@@ -11,8 +11,8 @@ import numpy as np
 def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Run Rust tests and plot heatmap.")
-    parser.add_argument('-p', '--partials', type=int, nargs="+",
-                        help='List with number of partial queues to use')
+    parser.add_argument('-s', '--subqueues', type=int, nargs="+",
+                        help='List with number of sub-queues to use')
     parser.add_argument('-o', '--operations', type=int,
                         help='Number of operations to run')
     parser.add_argument('-i', '--prefill', type=int,
@@ -21,17 +21,17 @@ def parse_arguments():
                         help='The number of runs to do for each data point [Possible: average, worst-one-percent] [Default = average]')
     parser.add_argument('--readout', type=str, default="average",
                         help='How to read out the error from each simulation [Default = average]')
-    parser.add_argument('-s', '--save_path', type=str,
+    parser.add_argument('--save_path', type=str,
                         help='Saves the graph, to this path if supplied.')
     parser.add_argument('--old_json', type=str,
                         help='Path to old JSON file containing to plot')
     return parser.parse_args()
 
 
-def run_rust_test(operations, partials, prefill, runs, readout):
-    partials_str = ' '.join(map(str, partials))
+def run_rust_test(operations, subqueues, prefill, runs, readout):
+    subqueues_str = ' '.join(map(str, subqueues))
     command = (
-        f"cargo run -- partials-and-prefill -o {operations} -p {partials_str} -i {prefill} -r {runs}"
+        f"cargo run -- subqueues-and-prefill -o {operations} -s {subqueues_str} -i {prefill} -r {runs}"
         f" --heuristic operation --readout {readout}"
     )
 
@@ -57,20 +57,20 @@ def extract_file_path(output):
 def read_and_parse_data(filepath):
     with open(filepath, 'r') as file:
         data = json.load(file)
-        partial_errors = sorted(
+        subqueue_errors = sorted(
             [(int(p_ops_str[1:].split(',')[0]), avg) for [p_ops_str, avg] in data], key=lambda pair: pair[0])
-    return partial_errors
+    return subqueue_errors
 
 
 def plot_graph(data_points, save_path, error_column, title="Operation Heuristic Scalability"):
     # Create a DataFrame from the list of tuples
-    df = pd.DataFrame(data_points, columns=['Partials', error_column])
+    df = pd.DataFrame(data_points, columns=['subqueues', error_column])
 
     # Apply the seaborn style
     sns.set_theme()
 
     fig, ax = plt.subplots()
-    sns.lineplot(data=df, x='Partials',
+    sns.lineplot(data=df, x='subqueues',
                  y=error_column, ax=ax, marker='o')
 
     # Setting the logarithmic scale for the x-axis with base 2
@@ -96,14 +96,14 @@ def main():
         # If JSON path is provided, use it directly
         file_path = args.old_json
     else:
-        if not (args.operations and args.partials and args.prefill):
+        if not (args.operations and args.subqueues and args.prefill):
             print(
-                "Please provide operations, partials, and prefill arguments or specify JSON file.")
+                "Please provide operations, subqueues, and prefill arguments or specify JSON file.")
             return
 
         # Run Rust command to generate new JSON files
         output = run_rust_test(
-            args.operations, args.partials, args.prefill, args.runs, args.readout)
+            args.operations, args.subqueues, args.prefill, args.runs, args.readout)
         file_path = extract_file_path(output)
 
     # Read data from the paths

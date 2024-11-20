@@ -9,15 +9,13 @@ def main():
     # Setting up command line arguments
     parser = argparse.ArgumentParser(
         description="Run cargo command and plot distributions.")
-    parser.add_argument('-p', '--partials',
-                        help='Partials argument')
+    parser.add_argument('-s', '--subqueues',
+                        help='Number of subqueues')
     parser.add_argument('-o', '--operations',
-                        help='Operations argument')
+                        help='Number of operations to simulate')
     parser.add_argument('-i', '--prefill',
-                        help='Prefill argument')
-    parser.add_argument('-r', '--runs', help='Runs argument')
-    # parser.add_argument('-s', '--distribution_samples',
-    #                     help='Distribution samples argument')
+                        help='Size of prefill')
+    parser.add_argument('-r', '--runs', help='How many runs to average over')
     parser.add_argument('--old_json', type=str,
                         help='Path to old JSON file containing to plot')
 
@@ -27,7 +25,7 @@ def main():
         # Constructing the command
         cmd = [
             "cargo", "run", "--", "distributions",
-            "-p", args.partials,
+            "-s", args.subqueues,
             "-o", args.operations,
             "-i", args.prefill
         ]

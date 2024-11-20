@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::{relaxed_fifo::RelaxedFifo, DRa};
+use crate::{relaxed_fifo::RelaxedFifo, DChoiceQueue};
 
 /// Analyze a relaxed queue (passed empty), returning all rank errors for the operations
 pub fn analyze_simple(
@@ -52,8 +52,8 @@ pub enum ErrorTag {
         /// The dequeue operation this was dequeued during, not including empty returns
         deq_nbr: usize,
 
-        /// The position this was enqueued at in the partial
-        partial_nbr: usize,
+        /// The position this was enqueued at in the sub-queue
+        sub_nbr: usize,
     },
 
     EmptyDequeue {
@@ -63,8 +63,8 @@ pub enum ErrorTag {
         /// The dequeue operation this was dequeued during, not including empty returns
         deq_nbr: usize,
 
-        /// The position in a partial that was attempted to dequeue from
-        partial_nbr: usize,
+        /// The position in a sub-queue that was attempted to dequeue from
+        sub_nbr: usize,
     },
 }
 
@@ -83,17 +83,17 @@ impl ErrorTag {
         }
     }
 
-    pub fn partial_nbr(&self) -> usize {
+    pub fn sub_nbr(&self) -> usize {
         match self {
-            ErrorTag::ItemDequeue { partial_nbr, .. } => *partial_nbr,
-            ErrorTag::EmptyDequeue { partial_nbr, .. } => *partial_nbr,
+            ErrorTag::ItemDequeue { sub_nbr, .. } => *sub_nbr,
+            ErrorTag::EmptyDequeue { sub_nbr, .. } => *sub_nbr,
         }
     }
 }
 
 /// Analyze a relaxed queue (passed empty), returning rank error and extra information for all dequeues
 pub fn analyze_extra(
-    relaxed_queue: &mut DRa<usize>,
+    relaxed_queue: &mut DChoiceQueue<usize>,
     prefill: usize,
     operations: &Vec<bool>,
 ) -> Vec<ErrorTag> {
@@ -120,16 +120,16 @@ pub fn analyze_extra(
             // Dequeue
             deq_nbr += 1;
             match relaxed_queue.dequeue_with_info() {
-                (Some(item), partial_nbr) => error_tags.push(ErrorTag::ItemDequeue {
+                (Some(item), sub_nbr) => error_tags.push(ErrorTag::ItemDequeue {
                     rank_error: strict_queue.relaxed_dequeue(item),
                     enq_nbr: item,
                     deq_nbr,
-                    partial_nbr,
+                    sub_nbr,
                 }),
-                (None, partial_nbr) => error_tags.push(ErrorTag::EmptyDequeue {
+                (None, sub_nbr) => error_tags.push(ErrorTag::EmptyDequeue {
                     rank_error: strict_queue.len(),
                     deq_nbr,
-                    partial_nbr,
+                    sub_nbr,
                 }),
             }
         }

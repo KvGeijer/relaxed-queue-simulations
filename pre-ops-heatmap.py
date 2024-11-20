@@ -12,17 +12,17 @@ from matplotlib.colors import LogNorm
 def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Run Rust tests and plot a single heatmap.")
-    parser.add_argument('-p', '--partials', type=int, help='partial queues')
+    parser.add_argument('-s', '--subqueues', type=int, help='The number of sub-queues to use.')
     parser.add_argument('-o', '--operations', type=int,
-                        nargs='+', help='operation count list')
+                        nargs='+', help='Operation count list')
     parser.add_argument('-i', '--prefill', type=int,
-                        nargs='+', help='prefill list')
+                        nargs='+', help='Prefill list')
     parser.add_argument('--earlier_json', type=str,
-                        help='Path to earlier JSON file')
+                        help='Path to earlier JSON file for just plotting')
     parser.add_argument('-r', '--runs', type=int, default=1,
                         help='The number of runs to do for each data point [Default = 1]')
-    parser.add_argument('-s', '--save_path', type=str,
-                        help='Saves the heatmaps, to this path if supplied.')
+    parser.add_argument('--save_path', type=str,
+                        help='Saves the heatmaps to this path if supplied.')
     parser.add_argument('--heuristic', type=str, default="length",
                         help='heuristic (length/operation) [Default=length]')
     parser.add_argument('--title', type=str,
@@ -31,13 +31,15 @@ def parse_arguments():
                         help='Puts upper and lower bounds on the heatmap color-bar.')
     parser.add_argument('--hide_colorbar', action='store_true',
                         help='Hides the color bar of the heatmap')
+    parser.add_argument('--hide_ylabel', action='store_true',
+                        help='Hides the ylabel and tick values of the heatmap')
     return parser.parse_args()
 
 
-def run_rust_test(operations, partials, prefill, runs, heuristic):
+def run_rust_test(operations, subqueues, prefill, runs, heuristic):
     operations_str = ' '.join(map(str, operations))
     prefill_str = ' '.join(map(str, prefill))
-    command = f"cargo run -- ops-and-prefill -o {operations_str} -p {partials} -i {prefill_str} -r {runs} --heuristic {heuristic}"
+    command = f"cargo run -- ops-and-prefill -o {operations_str} -s {subqueues} -i {prefill_str} -r {runs} --heuristic {heuristic}"
     result = subprocess.run(
         command, capture_output=True, text=True, shell=True)
     if result.returncode != 0:
@@ -74,11 +76,17 @@ def parse_and_transform_data(data):
     return np.array(x_vals), np.array(y_vals), np.array(z_vals)
 
 
-def plot_heatmap(x, y, z, save_path, title, color_bounds, hide_colorbar):
-    if hide_colorbar:
+def plot_heatmap(x, y, z, save_path, title, color_bounds, hide_colorbar, hide_ylabel):
+    if hide_colorbar and not hide_ylabel:
         fig, ax = plt.subplots(figsize=(3, 3.2))
-    else:
+    elif not hide_colorbar and hide_ylabel:
         fig, ax = plt.subplots(figsize=(3.3, 3.2))
+    elif hide_colorbar and hide_ylabel:
+        fig, ax = plt.subplots(figsize=(2.5, 3.2))
+    elif not hide_colorbar and not hide_ylabel:
+        fig, ax = plt.subplots(figsize=(3.8, 3.2))
+
+
 
     data_pivot = np.zeros((len(set(y)), len(set(x))))
     x_unique = sorted(set(x))
@@ -121,27 +129,30 @@ def plot_heatmap(x, y, z, save_path, title, color_bounds, hide_colorbar):
     # Change to 0, 45 or 90 depending on what you need
 
     if title is not None:
-        ax.set_title(title)
+        ax.set_title(title, fontsize=18)
 
     ax.tick_params(labelsize=11.5)
 
     ax.set_xlabel('prefill', fontsize=16)
 
-    if hide_colorbar:
+    if not hide_ylabel:
         ax.set_ylabel('operations', fontsize=16)
         ax.set_yticklabels(y_tick_labels, rotation=0)
     else:
         ax.set_yticklabels([])
-        # ax.set_yticklabels(None, rotation=0)
+
+    if not hide_colorbar:
         hmap.collections[0].colorbar.ax.tick_params(labelsize=11.5)
         hmap.collections[0].colorbar.set_label(
             'Average Rank Error', fontsize=16)
 
     plt.tight_layout(pad=0)
-    plt.show()
 
     if save_path:
         fig.savefig(f'{save_path}.pdf', format='pdf')
+    else:
+        plt.show()
+
 
 
 def main():
@@ -152,7 +163,7 @@ def main():
     else:
         # Run Rust command to generate new JSON files
         rust_output = run_rust_test(
-            args.operations, args.partials, args.prefill, args.runs, args.heuristic)
+            args.operations, args.subqueues, args.prefill, args.runs, args.heuristic)
         file_path = extract_file_path(rust_output)
 
     # Read data from the paths
@@ -161,7 +172,7 @@ def main():
     # Parse and plot data
     x, y, z = parse_and_transform_data(json_data)
     plot_heatmap(x, y, z, args.save_path, args.title,
-                 args.color_bounds, args.hide_colorbar)
+                 args.color_bounds, args.hide_colorbar, args.hide_ylabel)
 
 
 if __name__ == "__main__":

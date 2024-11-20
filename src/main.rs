@@ -11,7 +11,7 @@ use chrono::Local;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use rand::{seq::SliceRandom, thread_rng};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use relaxation_analysis::{analyze_distributions, analyze_simple, DRa};
+use relaxation_analysis::{analyze_distributions, analyze_simple, DChoiceQueue};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -76,8 +76,8 @@ enum Test {
         error_readout: ErrorReadout,
     },
 
-    /// Tests all combinations of partial queues and prefill
-    PartialsAndPrefill {
+    /// Tests all combinations of sub-queues and prefill
+    SubqueuesAndPrefill {
         /// The queue configuration to use
         #[command(flatten)]
         queue: QueueConfig,
@@ -86,9 +86,9 @@ enum Test {
         #[arg(short, long = "ops")]
         operations: usize,
 
-        /// All partial configurations to test
+        /// All subqueue configurations to test
         #[arg(short, value_delimiter = ' ', num_args = 1..)]
-        partials: Vec<usize>,
+        subqueues: Vec<usize>,
 
         /// The number of initial items in the queue before starting the experiment
         #[arg(short = 'i', long, value_delimiter = ' ', num_args = 1..)]
@@ -99,7 +99,7 @@ enum Test {
         operations_distribution: OperationDistribution,
 
         /// The name of the output json file, ends up at "results/{output_name}-{datetime}.json"
-        #[arg(long, default_value_t = format!("PartialsAndPrefill"))]
+        #[arg(long, default_value_t = format!("SubqueuesAndPrefill"))]
         output_name: String,
 
         /// The number of runs to average over for each data point
@@ -140,9 +140,9 @@ enum Test {
 
 #[derive(Args, Debug)]
 struct QueueArg {
-    /// The number of partial queues to use
+    /// The number of sub-queues to use
     #[arg(short, long)]
-    partials: usize,
+    subqueues: usize,
 
     /// Further config about how the queues works
     #[command(flatten)]
@@ -151,7 +151,7 @@ struct QueueArg {
 
 #[derive(Args, Debug)]
 struct QueueConfig {
-    /// The number of partials to sample for each operation (d).
+    /// The number of subqueues to sample for each operation (d).
     #[arg(short = 'd', long, default_value_t = 2)]
     sample_nbr: usize,
 
@@ -223,15 +223,15 @@ impl ErrorReadout {
 }
 
 impl QueueArg {
-    fn init(&self) -> DRa<usize> {
-        self.config.init(self.partials)
+    fn init(&self) -> DChoiceQueue<usize> {
+        self.config.init(self.subqueues)
     }
 }
 
 impl QueueConfig {
-    fn init(&self, partials: usize) -> DRa<usize> {
-        DRa::new(
-            partials,
+    fn init(&self, subqueues: usize) -> DChoiceQueue<usize> {
+        DChoiceQueue::new(
+            subqueues,
             self.sample_nbr,
             self.sampling == Sampling::Uniques,
             self.heuristic == Heuristic::Operation,
@@ -243,7 +243,7 @@ impl QueueConfig {
 fn main() {
     let cli = Cli::parse();
 
-    // For the progress-based one, the average error seems to scale with the number of partials
+    // For the progress-based one, the average error seems to scale with the number of subqueues
     // But the length-based one also scales with prefill and nbr_operations
 
     match cli.test {
@@ -316,10 +316,10 @@ fn main() {
 
             println!("Writing output to: {}", path.to_string_lossy());
         }
-        Test::PartialsAndPrefill {
+        Test::SubqueuesAndPrefill {
             queue,
             operations,
-            partials,
+            subqueues,
             prefill,
             operations_distribution,
             output_name,
@@ -327,11 +327,11 @@ fn main() {
             error_readout,
         } => {
             assert_uniques(&prefill);
-            assert_uniques(&partials);
+            assert_uniques(&subqueues);
 
             let ops_vec = gen_ops(operations_distribution, operations);
 
-            let results: Vec<((usize, usize), f32)> = partials
+            let results: Vec<((usize, usize), f32)> = subqueues
                 .par_iter()
                 .flat_map(|p| {
                     prefill.par_iter().map(|pre| {
@@ -383,10 +383,10 @@ fn main() {
             // Average each data point in the distributions over all the runs
             let mut rank_errors = vec![0f32; operations / 2];
             let mut enq_deq_diffs = vec![0f32; operations / 2];
-            let mut partial_deq_diffs = vec![0f32; operations / 2];
-            let mut partial_enq_diffs = vec![0f32; operations / 2];
-            let mut partial_deq_counts = vec![0f32; queue.partials];
-            let mut partial_enq_counts = vec![0f32; queue.partials];
+            let mut subqueue_deq_diffs = vec![0f32; operations / 2];
+            let mut subqueue_enq_diffs = vec![0f32; operations / 2];
+            let mut subqueue_deq_counts = vec![0f32; queue.subqueues];
+            let mut subqueue_enq_counts = vec![0f32; queue.subqueues];
 
             let results: Vec<_> = (0..runs)
                 .into_par_iter()
@@ -400,21 +400,21 @@ fn main() {
                 |(
                     new_rank_errors,
                     new_enq_deq_diffs,
-                    new_partial_deq_diffs,
-                    new_partial_enq_diffs,
-                    new_partial_enq_counts,
-                    new_partial_deq_counts,
+                    new_subqueue_deq_diffs,
+                    new_subqueue_enq_diffs,
+                    new_subqueue_enq_counts,
+                    new_subqueue_deq_counts,
                 )| {
                     // Sum up all values in each x point
                     for i in 0..rank_errors.len() {
                         rank_errors[i] += new_rank_errors[i];
                         enq_deq_diffs[i] += new_enq_deq_diffs[i];
-                        partial_deq_diffs[i] += new_partial_deq_diffs[i];
-                        partial_enq_diffs[i] += new_partial_enq_diffs[i];
+                        subqueue_deq_diffs[i] += new_subqueue_deq_diffs[i];
+                        subqueue_enq_diffs[i] += new_subqueue_enq_diffs[i];
                     }
-                    for i in 0..queue.partials {
-                        partial_enq_counts[i] += new_partial_enq_counts[i];
-                        partial_deq_counts[i] += new_partial_deq_counts[i];
+                    for i in 0..queue.subqueues {
+                        subqueue_enq_counts[i] += new_subqueue_enq_counts[i];
+                        subqueue_deq_counts[i] += new_subqueue_deq_counts[i];
                     }
                 },
             );
@@ -426,26 +426,26 @@ fn main() {
             enq_deq_diffs
                 .iter_mut()
                 .for_each(|item| *item = *item / runs as f32);
-            partial_deq_diffs
+            subqueue_deq_diffs
                 .iter_mut()
                 .for_each(|item| *item = *item / runs as f32);
-            partial_enq_diffs
+            subqueue_enq_diffs
                 .iter_mut()
                 .for_each(|item| *item = *item / runs as f32);
-            partial_deq_counts
+            subqueue_deq_counts
                 .iter_mut()
                 .for_each(|item| *item = *item / runs as f32);
-            partial_enq_counts
+            subqueue_enq_counts
                 .iter_mut()
                 .for_each(|item| *item = *item / runs as f32);
 
             let string_keyed_results = [
                 ("Rank Errors", rank_errors),
                 ("Enq-Deq id difference", enq_deq_diffs),
-                ("Deq load offset", partial_deq_diffs),
-                ("Enq load offset", partial_enq_diffs),
-                ("Enqueue partial counts", partial_enq_counts),
-                ("Dequeue partial counts", partial_deq_counts),
+                ("Deq load offset", subqueue_deq_diffs),
+                ("Enq load offset", subqueue_enq_diffs),
+                ("Enqueue sub-queue counts", subqueue_enq_counts),
+                ("Dequeue sub-queue counts", subqueue_deq_counts),
             ];
 
             let serialized_output = serde_json::to_string_pretty(&string_keyed_results)
