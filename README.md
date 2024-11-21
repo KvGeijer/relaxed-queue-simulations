@@ -21,6 +21,14 @@ cargo  run -r -- ops-and-prefill --subqueues 16 --ops 1000 2000 3000 4000 --pref
 
 There are also Python scripts that help you visualize the results. The most usable is likely [pre-ops-heatmap.py](./pre-ops-heatmap.py) which plots a heatmap of the results for varying number of operations and prefill used. See for example [recreate-ppopp.sh](./recreate-ppopp.sh) for how to use it.
 
+### Docker environment
+
+There is also a `Dockerfile` set up with the required environment. It is mainly created to run [recreate-ppopp.sh](./recreate-ppopp.sh). But can also be entered interactively if one wants. Build and run it as:
+```
+docker build -t relaxation-simulation .
+docker run --rm -v $(pwd)/results:/app/results relaxation-simulation
+```
+
 ## Related Publications
 * Balanced Allocations over Efficient Queues: A Fast Relaxed FIFO Queue
   * Kåre von Geijer, Philippas Tsigas, Elias Johansson, Sebastian Hermansson.
