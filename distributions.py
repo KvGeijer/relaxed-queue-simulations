@@ -24,7 +24,7 @@ def main():
     if not args.old_json:
         # Constructing the command
         cmd = [
-            "cargo", "run", "--", "distributions",
+            "cargo", "run", "-r", "--", "distributions",
             "-s", args.subqueues,
             "-o", args.operations,
             "-i", args.prefill

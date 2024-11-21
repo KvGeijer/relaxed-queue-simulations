@@ -31,7 +31,7 @@ def parse_arguments():
 def run_rust_test(operations, subqueues, prefill, runs, readout):
     subqueues_str = ' '.join(map(str, subqueues))
     command = (
-        f"cargo run -- subqueues-and-prefill -o {operations} -s {subqueues_str} -i {prefill} -r {runs}"
+        f"cargo run -r -- subqueues-and-prefill -o {operations} -s {subqueues_str} -i {prefill} -r {runs}"
         f" --heuristic operation --readout {readout}"
     )
 

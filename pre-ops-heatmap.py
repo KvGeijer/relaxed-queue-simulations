@@ -39,7 +39,7 @@ def parse_arguments():
 def run_rust_test(operations, subqueues, prefill, runs, heuristic):
     operations_str = ' '.join(map(str, operations))
     prefill_str = ' '.join(map(str, prefill))
-    command = f"cargo run -- ops-and-prefill -o {operations_str} -s {subqueues} -i {prefill_str} -r {runs} --heuristic {heuristic}"
+    command = f"cargo run -r -- ops-and-prefill -o {operations_str} -s {subqueues} -i {prefill_str} -r {runs} --heuristic {heuristic}"
     result = subprocess.run(
         command, capture_output=True, text=True, shell=True)
     if result.returncode != 0:
