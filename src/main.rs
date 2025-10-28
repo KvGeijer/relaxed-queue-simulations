@@ -11,7 +11,9 @@ use chrono::Local;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use rand::{seq::SliceRandom, thread_rng};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use relaxation_analysis::{analyze_distributions, analyze_simple, DChoiceQueue};
+use relaxation_analysis::{
+    analyze_distributions, analyze_minmax_gap, analyze_simple, DChoiceQueue,
+};
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -135,6 +137,28 @@ enum Test {
         /// The number of runs to average over for each data point
         #[arg(short, long, default_value_t = 1)]
         runs: usize,
+    },
+
+    /// So far just does a single run, would like more
+    MinMaxGaps {
+        /// The number of operations to run
+        #[arg(short, long = "ops")]
+        operations: usize,
+
+        /// All numbers of bins to use
+        #[arg(short, long)]
+        bins: Vec<usize>,
+
+        /// The number of subqueues to sample for each operation (d).
+        #[arg(short = 'd', long, default_value_t = 2)]
+        sample_nbr: usize,
+
+        /// The name of the output json file, ends up at "results/{output_name}-{datetime}.json"
+        #[arg(long, default_value_t = format!("MinMaxGaps"))]
+        output_name: String,
+        // /// The number of runs to average over for each data point
+        // #[arg(short, long, default_value_t = 1)]
+        // runs: usize,
     },
 }
 
@@ -450,6 +474,62 @@ fn main() {
 
             let serialized_output = serde_json::to_string_pretty(&string_keyed_results)
                 .expect("Could not serialize the output.");
+
+            let timestamp = Local::now().format("%Y%m%d-%H%M%S").to_string();
+            // TODO: Don't always save it in results, in case we want to run from somewhere else
+            let folder = "results";
+            let path = PathBuf::from(folder).join(format!("{output_name}-{timestamp}.json"));
+
+            // Create directory and file
+            create_dir_all(folder).expect("Could not create the results dir");
+            let mut file = File::create(&path).expect("Failed to create file");
+            file.write_all(serialized_output.as_bytes())
+                .expect("Failed to write output to file");
+
+            println!("Writing output to: {}", path.to_string_lossy());
+        }
+        Test::MinMaxGaps {
+            operations,
+            bins,
+            sample_nbr,
+            output_name,
+            // runs,
+        } => {
+            let (vec_ind, vec_mean, vec_max): (Vec<usize>, Vec<f32>, Vec<usize>) = bins
+                .par_iter()
+                .map(|bins| {
+                    let (_, max, mean) = analyze_minmax_gap(*bins, operations, sample_nbr);
+                    (*bins, mean, max)
+                })
+                // thread local
+                .fold(
+                    || (Vec::new(), Vec::new(), Vec::new()),
+                    |mut acc, (a, b, c)| {
+                        acc.0.push(a);
+                        acc.1.push(b);
+                        acc.2.push(c);
+                        acc
+                    },
+                )
+                // total reduction
+                .reduce(
+                    || (Vec::new(), Vec::new(), Vec::new()),
+                    |mut a, mut b| {
+                        a.0.append(&mut b.0);
+                        a.1.append(&mut b.1);
+                        a.2.append(&mut b.2);
+                        a
+                    },
+                );
+
+            let json_data = serde_json::json!({
+                "operations" : operations,
+                "bins": vec_ind,
+                "mean" : vec_mean,
+                "max": vec_max,
+            });
+            let serialized_output =
+                serde_json::to_string_pretty(&json_data).expect("Failed to serialize");
 
             let timestamp = Local::now().format("%Y%m%d-%H%M%S").to_string();
             // TODO: Don't always save it in results, in case we want to run from somewhere else
