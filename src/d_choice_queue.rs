@@ -144,13 +144,15 @@ impl<T: PartialEq + Eq> DChoiceQueue<T> {
         let mut rng = rand::thread_rng();
         if self.partition {
             let psize = (self.nbr_subqueues() + self.d - 1) / self.d;
-            (0..self.d)
+            let mut indexes: Vec<usize> = (0..self.d)
                 .map(|part| {
                     rng.gen_range(
                         part * psize..std::cmp::min(psize * (part + 1), self.nbr_subqueues()),
                     )
                 })
-                .collect()
+                .collect();
+            indexes.shuffle(&mut rng);
+            indexes
         } else if self.uniques {
             (0..self.subqueues.len())
                 .collect::<Vec<usize>>()
