@@ -19,6 +19,12 @@ pub struct DChoiceQueue<T: PartialEq + Eq> {
 
     /// If true, uses round robin when finding an empty queue
     empty_lin: bool,
+
+    /// If true, partitions sub-queues into d chunks and selects one queue from each each time
+    partition: bool,
+
+    /// If true, prefers left queue when tie-breaking
+    left: bool,
 }
 
 impl<T: PartialEq + Eq> DChoiceQueue<T> {
@@ -28,6 +34,8 @@ impl<T: PartialEq + Eq> DChoiceQueue<T> {
         uniques: bool,
         progress_heuristic: bool,
         empty_lin: bool,
+        partition: bool,
+        left: bool,
     ) -> Self {
         Self {
             subqueues: (0..nbr_subqueues).map(|_| SubQueue::new()).collect(),
@@ -35,6 +43,8 @@ impl<T: PartialEq + Eq> DChoiceQueue<T> {
             uniques,
             progress_heuristic,
             empty_lin,
+            partition,
+            left,
         }
     }
 
@@ -44,11 +54,14 @@ impl<T: PartialEq + Eq> DChoiceQueue<T> {
         let subqueue_ind = if self.progress_heuristic {
             self.subqueue_inds()
                 .into_iter()
-                .min_by_key(|ind| self.subqueues[*ind].tail)
+                .min_by_key(|ind| (self.subqueues[*ind].tail, if self.left { *ind } else { 0 }))
         } else {
-            self.subqueue_inds()
-                .into_iter()
-                .min_by_key(|ind| self.subqueues[*ind].tail - self.subqueues[*ind].head)
+            self.subqueue_inds().into_iter().min_by_key(|ind| {
+                (
+                    self.subqueues[*ind].tail - self.subqueues[*ind].head,
+                    if self.left { *ind } else { 0 },
+                )
+            })
         }
         .expect("Should always be able to find an index if d>0");
 
@@ -60,11 +73,18 @@ impl<T: PartialEq + Eq> DChoiceQueue<T> {
         let subqueue_ind = if self.progress_heuristic {
             self.subqueue_inds()
                 .into_iter()
-                .min_by_key(|ind| self.subqueues[*ind].head)
+                .min_by_key(|ind| (self.subqueues[*ind].head, if self.left { *ind } else { 0 }))
         } else {
-            self.subqueue_inds()
-                .into_iter()
-                .max_by_key(|ind| self.subqueues[*ind].tail - self.subqueues[*ind].head)
+            self.subqueue_inds().into_iter().max_by_key(|ind| {
+                (
+                    self.subqueues[*ind].tail - self.subqueues[*ind].head,
+                    if self.left {
+                        self.nbr_subqueues() - *ind
+                    } else {
+                        0
+                    },
+                )
+            })
         }
         .expect("Should always be able to find an index if d>0");
 
@@ -89,11 +109,18 @@ impl<T: PartialEq + Eq> DChoiceQueue<T> {
         let subqueue_ind = if self.progress_heuristic {
             self.subqueue_inds()
                 .into_iter()
-                .min_by_key(|ind| self.subqueues[*ind].head)
+                .min_by_key(|ind| (self.subqueues[*ind].head, if self.left { *ind } else { 0 }))
         } else {
-            self.subqueue_inds()
-                .into_iter()
-                .max_by_key(|ind| self.subqueues[*ind].tail - self.subqueues[*ind].head)
+            self.subqueue_inds().into_iter().max_by_key(|ind| {
+                (
+                    self.subqueues[*ind].tail - self.subqueues[*ind].head,
+                    if self.left {
+                        self.nbr_subqueues() - *ind
+                    } else {
+                        0
+                    },
+                )
+            })
         }
         .expect("Should always be able to find an index if d>0");
 
@@ -114,7 +141,17 @@ impl<T: PartialEq + Eq> DChoiceQueue<T> {
 
     /// Gets sub-queue inds, depending on allowing repeats of not
     fn subqueue_inds(&self) -> Vec<usize> {
-        if self.uniques {
+        let mut rng = rand::thread_rng();
+        if self.partition {
+            let psize = (self.nbr_subqueues() + self.d - 1) / self.d;
+            (0..self.d)
+                .map(|part| {
+                    rng.gen_range(
+                        part * psize..std::cmp::min(psize * (part + 1), self.nbr_subqueues()),
+                    )
+                })
+                .collect()
+        } else if self.uniques {
             (0..self.subqueues.len())
                 .collect::<Vec<usize>>()
                 .choose_multiple(&mut rand::thread_rng(), self.d)
@@ -128,10 +165,16 @@ impl<T: PartialEq + Eq> DChoiceQueue<T> {
     }
 
     pub fn print_skewness(&self) {
-        let (mean_head, std_head) =
-            std(&self.subqueues.iter().map(|p| p.head).collect::<Vec<usize>>());
-        let (mean_tail, std_tail) =
-            std(&self.subqueues.iter().map(|p| p.tail).collect::<Vec<usize>>());
+        let (mean_head, std_head) = std(&self
+            .subqueues
+            .iter()
+            .map(|p| p.head)
+            .collect::<Vec<usize>>());
+        let (mean_tail, std_tail) = std(&self
+            .subqueues
+            .iter()
+            .map(|p| p.tail)
+            .collect::<Vec<usize>>());
         println!("Mean head: {mean_head}, std: {std_head}");
         println!("Mean tail: {mean_tail}, std: {std_tail}");
         print!("Heads: ");

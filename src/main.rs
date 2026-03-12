@@ -186,6 +186,10 @@ struct QueueConfig {
     /// What index sampling method to use
     #[arg(value_enum, long, default_value_t = Sampling::Naive)]
     sampling: Sampling,
+
+    /// What selection strategy to use for selecting sub-queue
+    #[arg(value_enum, long, default_value_t = QueueSelection::Random)]
+    selection: QueueSelection,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
@@ -204,6 +208,21 @@ enum Sampling {
 
     /// Does not sample the same index twice
     Uniques,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
+enum QueueSelection {
+    /// Uniformly random
+    Random,
+
+    /// Prefer queues to the left
+    Left,
+
+    /// Partition queues into d groups, sampling randomly per group, random tiebreak
+    RandomPart,
+
+    /// Partition queues into d groups, sampling randomly per group, and prefer left
+    LeftPart,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
@@ -260,6 +279,9 @@ impl QueueConfig {
             self.sampling == Sampling::Uniques,
             self.heuristic == Heuristic::Operation,
             true,
+            self.selection == QueueSelection::RandomPart
+                || self.selection == QueueSelection::LeftPart,
+            self.selection == QueueSelection::Left || self.selection == QueueSelection::LeftPart,
         )
     }
 }

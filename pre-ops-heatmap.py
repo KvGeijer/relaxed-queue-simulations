@@ -12,7 +12,8 @@ from matplotlib.colors import LogNorm
 def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Run Rust tests and plot a single heatmap.")
-    parser.add_argument('-s', '--subqueues', type=int, help='The number of sub-queues to use.')
+    parser.add_argument('-s', '--subqueues', type=int,
+                        help='The number of sub-queues to use.')
     parser.add_argument('-o', '--operations', type=int,
                         nargs='+', help='Operation count list')
     parser.add_argument('-i', '--prefill', type=int,
@@ -86,8 +87,6 @@ def plot_heatmap(x, y, z, save_path, title, color_bounds, hide_colorbar, hide_yl
     elif not hide_colorbar and not hide_ylabel:
         fig, ax = plt.subplots(figsize=(3.8, 3.2))
 
-
-
     data_pivot = np.zeros((len(set(y)), len(set(x))))
     x_unique = sorted(set(x))
     y_unique = sorted(set(y))
@@ -152,7 +151,6 @@ def plot_heatmap(x, y, z, save_path, title, color_bounds, hide_colorbar, hide_yl
         fig.savefig(f'{save_path}.pdf', format='pdf')
     else:
         plt.show()
-
 
 
 def main():
